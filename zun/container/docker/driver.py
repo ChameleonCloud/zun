@@ -36,6 +36,7 @@ import zun.conf
 from zun.container.docker import host
 from zun.container.docker import utils as docker_utils
 from zun.container import driver
+from zun.container import oci
 from zun.image import driver as img_driver
 from zun.network import network as zun_network
 from zun import objects
@@ -251,7 +252,7 @@ class DockerDriver(driver.ContainerDriver):
                 LOG.warning("Unable to read image data from tarfile")
 
     def create(self, context, container, image, requested_networks,
-               requested_volumes):
+               requested_volumes, device_attach_infos=None):
         with docker_utils.docker_client() as docker:
             network_api = zun_network.api(context=context, docker_api=docker)
             name = container.name
@@ -320,7 +321,25 @@ class DockerDriver(driver.ContainerDriver):
                 healthcheck['timeout'] = timeout * 10 ** 9
                 kwargs['healthcheck'] = healthcheck
 
+            if device_attach_infos:
+                oci_config = oci.merge_oci_runtime_config({}, *device_attach_infos)
+                if not kwargs['environment']:
+                    kwargs['environment'] = {}
+                kwargs['environment'].update(oci_config['process']['env'])
+                # TODO: readonly?
+                host_config['binds'].update({
+                    mnt['source']: {'bind': mnt['dest']}
+                    for mnt in oci_config['mounts']
+                })
+                kwargs['volumes'].extend([mnt['dest'] for mnt in oci_config['mounts']])
+                host_config['devices'] = []
+                for dev in oci_config['linux']['devices']:
+                    # TODO: actually look up cgroups for access info
+                    host_config['devices'].append(
+                        f'{dev["path"]}:{dev["path"]}:r')
+
             kwargs['host_config'] = docker.create_host_config(**host_config)
+
             if image['tag']:
                 image_repo = image['repo'] + ":" + image['tag']
             else:
@@ -1218,9 +1237,9 @@ class DockerDriver(driver.ContainerDriver):
             network_api.remove_network(network)
 
     def create_capsule(self, context, capsule, image, requested_networks,
-                       requested_volumes):
+                       requested_volumes, device_attach_infos=None):
         capsule = self.create(context, capsule, image, requested_networks,
-                              requested_volumes)
+                              requested_volumes, device_attach_infos=device_attach_infos)
         self.start(context, capsule)
         for container in capsule.init_containers:
             self._create_container_in_capsule(context, capsule, container,

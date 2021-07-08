@@ -22,6 +22,7 @@ from zun.common import profiler
 from zun.compute import container_actions
 from zun.compute import rpcapi
 import zun.conf
+from zun.device import cyborg
 from zun import objects
 from zun.scheduler.client import query as scheduler_client
 
@@ -98,7 +99,7 @@ class API(object):
         self.rpcapi.container_create(context, host_state['host'],
                                      new_container, host_state['limits'],
                                      requested_networks, requested_volumes,
-                                     run, pci_requests)
+                                     run, pci_requests, device_attach_infos)
 
     def _validate_host(self, context, container, host):
         """Check whether compute nodes exist by validating the host.
