@@ -480,6 +480,8 @@ class ContainersController(base.Controller):
 
                 requested_resources.append(
                     objects.RequestGroup(context,
+                        # Cyborg uses nested providers to manage devices
+                        use_same_provider=False,
                         requestor_id=requestor_id,
                         resources=resources,
                         required_traits=required_traits,
