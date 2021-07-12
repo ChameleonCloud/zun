@@ -456,8 +456,8 @@ class ContainersController(base.Controller):
             requested_resources = extra_spec.setdefault('requested_resources', [])
             # Setting group_policy is required when adding more request groups
             extra_spec.setdefault('group_policy', 'none')
-
-            for requestor_id, req_grp in cyborg_client.get_request_groups().items():
+            device_groups = cyborg_client.get_request_groups(device_profiles)
+            for requestor_id, req_grp in device_groups.items():
                 resources = {}
                 required_traits = []
                 forbidden_traits = []
