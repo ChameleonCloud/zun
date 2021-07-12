@@ -465,8 +465,8 @@ class ContainersController(base.Controller):
                 forbidden_traits = set()
                 for key, value in req_grp.items():
                     prefix, ident = key.split(":")
-                    if prefix == "rc":
-                        # ident == the resource class for "rc:..." fields
+                    if prefix == "resources":
+                        # ident == the resource class for "resources:..." fields
                         resources[ident] = int(value)
                     elif prefix.startswith("trait"):
                         if value == "required":
