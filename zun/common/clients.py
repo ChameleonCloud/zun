@@ -162,7 +162,7 @@ class OpenStackClients(object):
             'session': self.keystone().session,
             'auth': self.keystone().auth,
         }
-        self._cyborg_ks_filter = {'service_type': 'cyborg',
+        self._cyborg_ks_filter = {'service_type': 'accelerator',
                                   'region_name': region_name,
                                   'interface': endpoint_type}
         self._cyborg = ka_adapter.Adapter().load_from_options(**kwargs)
