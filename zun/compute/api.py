@@ -99,7 +99,7 @@ class API(object):
         self.rpcapi.container_create(context, host_state['host'],
                                      new_container, host_state['limits'],
                                      requested_networks, requested_volumes,
-                                     run, pci_requests, device_attach_infos)
+                                     run, pci_requests)
 
     def _validate_host(self, context, container, host):
         """Check whether compute nodes exist by validating the host.

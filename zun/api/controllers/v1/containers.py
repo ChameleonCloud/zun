@@ -452,7 +452,11 @@ class ContainersController(base.Controller):
         if device_profiles:
             api_utils.version_check('device_profiles', '1.40')
             cyborg_client = cyborg.CyborgClient(context)
+
             requested_resources = extra_spec.setdefault('requested_resources', [])
+            # Setting group_policy is required when adding more request groups
+            extra_spec.setdefault('group_policy', 'none')
+
             for requestor_id, req_grp in cyborg_client.get_request_groups().items():
                 resources = {}
                 required_traits = []
