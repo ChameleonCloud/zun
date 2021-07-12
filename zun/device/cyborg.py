@@ -13,6 +13,7 @@
 # limitations under the License.
 
 from re import I
+from zun import device
 from oslo_log import log as logging
 from oslo_middleware import request_id
 
@@ -88,7 +89,11 @@ class CyborgClient(object):
                 error=resp.text
             )
         request_groups = {}
-        for dp in resp.json()["device_profiles"]:
+        all_profiles = resp.json()["device_profiles"]
+        LOG.info(all_profiles)
+        for dp in all_profiles:
+            if dp["name"] not in device_profiles:
+                continue
             for group_id, group in enumerate(dp["groups"]):
                 request_groups[f"device_profile:{dp['name']}:{group_id}"] = group
         return request_groups
