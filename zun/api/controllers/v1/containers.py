@@ -461,8 +461,8 @@ class ContainersController(base.Controller):
 
             for requestor_id, req_grp in device_groups.items():
                 resources = {}
-                required_traits = []
-                forbidden_traits = []
+                required_traits = set()
+                forbidden_traits = set()
                 for key, value in req_grp.items():
                     prefix, ident = key.split(":")
                     if prefix == "rc":
@@ -470,9 +470,9 @@ class ContainersController(base.Controller):
                         resources[ident] = int(value)
                     elif prefix.startswith("trait"):
                         if value == "required":
-                            required_traits.append(ident)
+                            required_traits.add(ident)
                         elif value == "forbidden":
-                            forbidden_traits.append(ident)
+                            forbidden_traits.add(ident)
                         else:
                             pass
                     else:
