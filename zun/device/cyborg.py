@@ -82,7 +82,7 @@ class CyborgClient(object):
                                    logger=LOG)
 
     def get_request_groups(self, device_profiles):
-        resp = self.get("/v2/device_profiles")
+        resp = self.get("/device_profiles")
         if resp.status_code != 200:
             raise exception.DeviceRequestFailed(
                 "Failed to fetch device profiles: %(error)s",
@@ -99,6 +99,4 @@ class CyborgClient(object):
         return request_groups
 
     def create_and_bind_arqs(self, container, host_state):
-        patch_list = {}
-        # Look up device RPs in placement
-        self.put(f"/v2/accelerator_requests/{arq_uuid}", [])
+        pass
