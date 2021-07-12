@@ -340,6 +340,7 @@ def resources_from_request_spec(ctxt, container_obj, extra_specs):
 
     requested_resources = extra_specs.get('requested_resources', [])
     for group in requested_resources:
+        LOG.info('adding request group: %s', group)
         res_req.add_request_group(group)
 
     target_host = extra_specs.get('requested_host')
