@@ -287,7 +287,7 @@ class ContainersController(base.Controller):
     def post(self, run=False, **container_dict):
         return self._do_post(run, **container_dict)
 
-    @base.Controller.api_version("1.39")  # noqa
+    @base.Controller.api_version("1.39", "1.39")  # noqa
     @pecan.expose('json')
     @api_utils.enforce_content_types(['application/json'])
     @exception.wrap_pecan_controller_exception
