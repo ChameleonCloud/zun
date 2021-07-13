@@ -45,7 +45,7 @@ class API(rpc_service.API):
 
         * 1.0 - Initial version.
         * 1.1 - Add image endpoints.
-        * 1.2 - Add device_attach_infos to container_create.
+        * 1.2 - Add device_attachments to container_create.
     """
 
     def __init__(self, context=None, topic=None):
@@ -58,14 +58,14 @@ class API(rpc_service.API):
 
     def container_create(self, context, host, container, limits,
                          requested_networks, requested_volumes, run,
-                         pci_requests, device_attach_infos):
+                         pci_requests, device_attachments):
         self._cast(host, 'container_create', limits=limits,
                    requested_networks=requested_networks,
                    requested_volumes=requested_volumes,
                    container=container,
                    run=run,
                    pci_requests=pci_requests,
-                   device_attach_infos=device_attach_infos)
+                   device_attachments=device_attachments)
 
     @check_container_host
     def container_delete(self, context, container, force=False):

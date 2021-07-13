@@ -252,7 +252,7 @@ class DockerDriver(driver.ContainerDriver):
                 LOG.warning("Unable to read image data from tarfile")
 
     def create(self, context, container, image, requested_networks,
-               requested_volumes, device_attach_infos=None):
+               requested_volumes, device_attachments=None):
         with docker_utils.docker_client() as docker:
             network_api = zun_network.api(context=context, docker_api=docker)
             name = container.name
@@ -321,8 +321,8 @@ class DockerDriver(driver.ContainerDriver):
                 healthcheck['timeout'] = timeout * 10 ** 9
                 kwargs['healthcheck'] = healthcheck
 
-            if device_attach_infos:
-                oci_config = oci.merge_oci_runtime_config({}, *device_attach_infos)
+            if device_attachments:
+                oci_config = oci.merge_oci_runtime_config({}, *device_attachments)
                 if not kwargs['environment']:
                     kwargs['environment'] = {}
                 kwargs['environment'].update(oci_config['process']['env'])
@@ -1237,9 +1237,9 @@ class DockerDriver(driver.ContainerDriver):
             network_api.remove_network(network)
 
     def create_capsule(self, context, capsule, image, requested_networks,
-                       requested_volumes, device_attach_infos=None):
+                       requested_volumes, device_attachments=None):
         capsule = self.create(context, capsule, image, requested_networks,
-                              requested_volumes, device_attach_infos=device_attach_infos)
+                              requested_volumes, device_attachments=device_attachments)
         self.start(context, capsule)
         for container in capsule.init_containers:
             self._create_container_in_capsule(context, capsule, container,

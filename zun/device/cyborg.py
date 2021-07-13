@@ -98,5 +98,47 @@ class CyborgClient(object):
                 request_groups[f"device_profile:{dp['name']}:{group_id}"] = group
         return request_groups
 
-    def create_and_bind_arqs(self, container, host_state):
-        pass
+    def create_and_bind_arqs(self, container, host_state, device_rps):
+        arqs = []
+        for device_profile_name in device_rps.keys():
+            resp = self.post("/accelerator_requests", {
+                "device_profile_name": device_profile_name
+            })
+            if resp.status_code != 200:
+                raise exception.DeviceRequestFailed(
+                    device_profile=device_profile_name, error=resp.text)
+            arqs.extend(resp.json()["arqs"])
+
+        LOG.info("Created ARQs for %s", container)
+
+        patch = {}
+        for arq in arqs:
+            dp_name = arq["device_profile_name"]
+            dp_group_id = arq["device_profile_group_id"]
+            device_rp_uuid = device_rps.get(dp_name, {}).get(dp_group_id)
+            if not device_rp_uuid:
+                raise exception.DeviceRequestFailed(
+                    "Failed to find device resource provider for group "
+                    "%(group_id)s of profile %(device_profile)s from "
+                    "allocations", device_profile=dp_name,
+                    group_id=dp_group_id
+                )
+            patch[arq["uuid"]] = [
+                {"path": "/instance_uuid", "value": container.uuid,
+                 "op": "replace"},
+                {"path": "/hostname", "value": host_state.host,
+                 "op": "replace"},
+                {"path": "/device_rp_uuid", "value": device_rp_uuid,
+                 "op": "replace"},
+            ]
+
+        resp = self.patch("/accelerator_requests", patch)
+        if resp.status_code != 200:
+            raise exception.DeviceRequestFailed(
+                "Failed to bind device ARQs for container: %(error)s",
+                error=resp.text
+            )
+        bound_arqs = resp.json()
+        LOG.info("Bound ARQs for %s", container)
+
+        return bound_arqs

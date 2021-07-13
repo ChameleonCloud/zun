@@ -44,7 +44,7 @@ class Scheduler(object):
                 and not service.disabled]
 
     @abc.abstractmethod
-    def select_destinations(self, context, containers, extra_specs,
+    def select_destinations(self, context, containers, extra_specs, resources,
                             alloc_reqs_by_rp_uuid, provider_summaries,
                             allocation_request_version=None):
         """Must override select_destinations method.

@@ -147,7 +147,7 @@ class FilterScheduler(driver.Scheduler):
         return self.filter_handler.get_filtered_objects(
             self.enabled_filters, hosts, container, extra_specs)
 
-    def select_destinations(self, context, containers, extra_specs,
+    def select_destinations(self, context, containers, extra_specs, resources,
                             alloc_reqs_by_rp_uuid, provider_summaries,
                             allocation_request_version=None):
         """Selects destinations by filters."""
@@ -156,8 +156,10 @@ class FilterScheduler(driver.Scheduler):
             host = self._schedule(context, container, extra_specs,
                                   alloc_reqs_by_rp_uuid, provider_summaries,
                                   allocation_request_version)
+            alloc_req = alloc_reqs_by_rp_uuid[host.uuid][0]
             host_state = dict(host=host.hostname, nodename=None,
-                              limits=host.limits)
+                              limits=host.limits,
+                              resource_mappings=alloc_req["mappings"])
             dests.append(host_state)
 
         if len(dests) < 1:

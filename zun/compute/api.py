@@ -94,12 +94,28 @@ class API(object):
                 LOG.warning("Skip validation since image search failed with "
                             "unexpected exception: %s", str(e))
 
+        device_rps = {}
+        for resource_group in extra_spec.get("requested_resources", []):
+            groupid = resource_group.requestor_id
+            if groupid and groupid.startswith("device_profile:"):
+                _, device_profile_name, group = groupid.split(":")
+                device_rps.setdefault(device_profile_name, {})
+                device_rp = host_state['resource_mappings'].get(groupid)
+                device_rps[device_profile_name][group] = device_rp
+
+        device_attachments = []
+        if device_rps:
+            arqs = cyborg.CyborgClient(context).create_and_bind_arqs(
+                new_container, host_state, device_rps)
+            device_attachments = [arq["attach_info"] for arq in arqs]
+
         self._record_action_start(context, new_container,
                                   container_actions.CREATE)
         self.rpcapi.container_create(context, host_state['host'],
                                      new_container, host_state['limits'],
                                      requested_networks, requested_volumes,
-                                     run, pci_requests)
+                                     run, pci_requests,
+                                     device_attachments)
 
     def _validate_host(self, context, container, host):
         """Check whether compute nodes exist by validating the host.

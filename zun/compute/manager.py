@@ -250,7 +250,7 @@ class Manager(periodic_task.PeriodicTasks):
 
     def container_create(self, context, limits, requested_networks,
                          requested_volumes, container, run, pci_requests=None,
-                         device_attach_infos=None):
+                         device_attachments=None):
         @utils.synchronized(container.uuid)
         def do_container_create():
             with utils.FinishAction(context, container_actions.CREATE,
@@ -261,7 +261,7 @@ class Manager(periodic_task.PeriodicTasks):
                 self._check_support_disk_quota(context, container)
                 created_container = self._do_container_create(
                     context, container, requested_networks, requested_volumes,
-                    pci_requests, device_attach_infos, limits)
+                    pci_requests, device_attachments, limits)
                 if run:
                     self._do_container_start(context, created_container)
 
@@ -287,7 +287,7 @@ class Manager(periodic_task.PeriodicTasks):
             container.save(context)
 
     def _do_container_create_base(self, context, container, requested_networks,
-                                  requested_volumes, device_attach_infos=None,
+                                  requested_volumes, device_attachments=None,
                                   limits=None):
         with self._update_task_state(context, container,
                                      consts.CONTAINER_CREATING):
@@ -332,12 +332,12 @@ class Manager(periodic_task.PeriodicTasks):
                                                            image,
                                                            requested_networks,
                                                            requested_volumes,
-                                                           device_attach_infos=device_attach_infos)
+                                                           device_attachments=device_attachments)
                 elif isinstance(container, objects.Container):
                     container = self.driver.create(context, container, image,
                                                    requested_networks,
                                                    requested_volumes,
-                                                   device_attach_infos=device_attach_infos)
+                                                   device_attachments=device_attachments)
                 return container
             except exception.DockerError as e:
                 with excutils.save_and_reraise_exception():
@@ -355,7 +355,7 @@ class Manager(periodic_task.PeriodicTasks):
     @wrap_container_event(prefix='compute')
     def _do_container_create(self, context, container, requested_networks,
                              requested_volumes, pci_requests=None,
-                             device_attach_infos=None, limits=None):
+                             device_attachments=None, limits=None):
         LOG.debug('Creating container: %s', container.uuid)
 
         try:
@@ -363,7 +363,7 @@ class Manager(periodic_task.PeriodicTasks):
             with rt.container_claim(context, container, pci_requests, limits):
                 created_container = self._do_container_create_base(
                     context, container, requested_networks, requested_volumes,
-                    device_attach_infos=device_attach_infos, limits=limits)
+                    device_attachments=device_attachments, limits=limits)
                 return created_container
         except exception.ResourcesUnavailable as e:
             with excutils.save_and_reraise_exception():
