@@ -99,6 +99,7 @@ class CyborgClient(object):
         return request_groups
 
     def create_and_bind_arqs(self, container, host_state, device_rps):
+        # TODO: clean up ARQs if anything failed.
         arqs = []
         for device_profile_name in device_rps.keys():
             resp = self.post("/accelerator_requests", {

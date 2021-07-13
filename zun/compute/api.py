@@ -98,7 +98,7 @@ class API(object):
         for resource_group in extra_spec.get("requested_resources", []):
             groupid = resource_group.requestor_id
             if groupid and groupid.startswith("device_profile:"):
-                _, device_profile_name, group = groupid.split(":")
+                prefix, device_profile_name, group = groupid.split(":")
                 device_rps.setdefault(device_profile_name, {})
                 device_rp = host_state['resource_mappings'].get(groupid)
                 device_rps[device_profile_name][group] = device_rp
