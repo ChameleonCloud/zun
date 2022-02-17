@@ -26,11 +26,12 @@ CONF = zun.conf.CONF
 class WebSocketClient(object):
 
     def __init__(self, host_url, escape='~',
-                 close_wait=0.5):
+                 close_wait=0.5, **options):
         self.escape = escape
         self.close_wait = close_wait
         self.host_url = host_url
         self.cs = None
+        self.options = options
 
     def connect(self):
         url = self.host_url
@@ -45,7 +46,8 @@ class WebSocketClient(object):
         try:
             self.ws = websocket.create_connection(url,
                                                   sslopt=sslopt,
-                                                  skip_utf8_validation=True)
+                                                  skip_utf8_validation=True,
+                                                  **self.options)
         except socket.error as e:
             raise exception.ConnectionFailed(e)
         except websocket.WebSocketConnectionClosedException as e:
