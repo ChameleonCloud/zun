@@ -642,9 +642,9 @@ class K8sDriver(driver.ContainerDriver):
         pod = pod_list.items[0] if pod_list.items else None
         return pod
 
-    def reboot(self, context, container):
+    def reboot(self, context, container, timeout):
         """Reboot a container."""
-        self.stop(context, container, None)
+        self.stop(context, container, timeout)
         self.start(context, container)
 
     def stop(self, context, container, timeout):
