@@ -266,6 +266,8 @@ def _pod_ips(pod):
 
 class K8sDriver(driver.ContainerDriver):
 
+    async_tasks = True
+
     # There are no defined capabilities still... but this is required to exist.
     capabilities = {}
 
