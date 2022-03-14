@@ -247,13 +247,16 @@ def to_num_bytes(size_spec: str):
     return int(size_spec)
 
 
-def is_exception_like(api_exc: client.ApiException, code=None, **kwargs):
+def is_exception_like(api_exc: client.ApiException, code=None, message_like=None, **kwargs):
     if code and api_exc.status != code:
+        return False
+    exc_json = jsonutils.loads(api_exc.body)
+    if message_like and message_like not in exc_json.get("message", ""):
         return False
     # Interpret keyword args as matchers/filters on the "details" part of the response
     details_matcher = kwargs
     if details_matcher:
-        details = jsonutils.loads(api_exc.body).get("details", {})
+        details = exc_json.get("details", {})
         return all(details[k] == v for k, v in details_matcher.items())
     return True
 
@@ -324,7 +327,7 @@ class K8sDriver(driver.ContainerDriver):
                     time.sleep(backoff)
                 _do_watch()
             except client.ApiException as exc:
-                if exc.status == 410:
+                if is_exception_like(exc, code=410):
                     LOG.debug("Pod watcher has expired and will be reconnected")
                 else:
                     LOG.error(f"Unexpected K8s API error: {exc}")
@@ -690,13 +693,17 @@ class K8sDriver(driver.ContainerDriver):
         pod = self._pod_for_container(context, container)
         if not pod:
             return None
-        return self.core_v1.read_namespaced_pod_log(
-            pod.metadata.name,
-            container.project_id,
-            tail_lines=(tail if tail and tail != "all" else None),
-            timestamps=timestamps,
-            since_seconds=since
-        )
+        try:
+            return self.core_v1.read_namespaced_pod_log(
+                pod.metadata.name,
+                container.project_id,
+                tail_lines=(tail if tail and tail != "all" else None),
+                timestamps=timestamps,
+                since_seconds=since
+            )
+        except client.ApiException as exc:
+            if not is_exception_like(exc, code=400, message_like="ContainerCreating"):
+                raise
 
     def execute_create(self, context, container, command, interactive):
         """Create an execute instance for running a command."""
