@@ -258,6 +258,34 @@ def deployment(container, image, requested_volumes=None, image_pull_secrets=None
     }
 
 
+def calico_project_network_policy(project_id):
+    return_val = {
+        "metadata": {
+            "name": "default",
+            "namespace": project_id,
+        },
+        "spec": {
+            "selector": "all()",
+            "types": ["Egress"],
+            "egress": [
+                {
+                    "action": "Allow",
+                    "destination": {"selector": "all()"}
+                },
+                {
+                    "action": "Deny",
+                    "destination": {"nets": [
+                        "10.0.0.0/8",
+                        "172.16.0.0/12",
+                        "192.168.0.0/16",
+                    ]}
+                },
+                {"action": "Allow"},
+            ]
+        }
+    }
+    return return_val
+
 def default_network_policy(project_id):
     return {
         "metadata": {

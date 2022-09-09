@@ -32,6 +32,7 @@ from zun.common import exception, utils
 from zun.common.docker_image import reference as docker_image
 from zun.container import driver
 from zun.container.k8s import exception as k8s_exc, host, mapping, network, volume
+from .calico import CalicoV3Api
 
 CONF = zun.conf.CONF
 LOG = logging.getLogger(__name__)
@@ -81,6 +82,7 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
         self.apps_v1 = client.AppsV1Api()
         self.custom = client.CustomObjectsApi()
         self.net_v1 = client.NetworkingV1Api()
+        self.calico_v3 = CalicoV3Api()
 
         # self.network_api = zun_network.api(admin_context, self.net_v1)
         k8s_network = network.K8sNetwork()
@@ -140,26 +142,48 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
 
         ns_list = self.core_v1.list_namespace(
             label_selector=mapping.LABELS["project_id"])
-        network_policy_list = self.net_v1.list_network_policy_for_all_namespaces()
-        network_policy_map = defaultdict(list)
-        for netpolicy in network_policy_list.items:
-            network_policy_map[netpolicy.metadata.namespace].append(netpolicy)
 
         for ns in ns_list.items:
             ns_name = ns.metadata.name
             project_id = ns.metadata.labels[mapping.LABELS["project_id"]]
-            network_policies = network_policy_map[ns_name]
+            self._sync_per_project_default_network_policy(ns_name, project_id)
 
-            default_network_policy = mapping.default_network_policy(project_id)
-            if not any(
-                np.metadata.name == default_network_policy["metadata"]["name"]
-                for np in network_policies
-            ):
-                # Create a default policy that allows pods within the same namespace
-                # to communicate directly with eachother.
-                self.net_v1.create_namespaced_network_policy(
-                    ns_name, default_network_policy)
-                LOG.info(f"Created default network policy for project {project_id}")
+
+    def _sync_per_project_default_network_policy(self, ns_name, project_id):
+        """Sets defaults per project/namespace.
+
+        First, create or update approprtiate calico network policy.
+        Then, ensure legacy k8s policy is deleted.
+        """
+        calico_default_policy = mapping.calico_project_network_policy(project_id)
+        calico_default_policy_name = calico_default_policy["metadata"]["name"]
+
+        try:
+            self.calico_v3.patch_namespaced_network_policy(
+                name=calico_default_policy_name,
+                namespace=ns_name,
+                body=calico_default_policy
+            )
+            LOG.debug(f"Updated per-project calico policy for project: {project_id}")
+        except client.ApiException as ex:
+            if ex.status == 404:
+                self.calico_v3.create_namespaced_network_policy(namespace=ns_name,body=calico_default_policy)
+                LOG.info(f"Created per-project calico policy for project: {project_id}")
+            else:
+                LOG.warn(f"got exception when creating per-project calico policy: {ex}")
+                raise ex
+
+        legacy_default_policy = mapping.default_network_policy(project_id)
+        legacy_default_policy_name = legacy_default_policy["metadata"]["name"]
+
+        try:
+            self.net_v1.delete_namespaced_network_policy(legacy_default_policy_name,ns_name)
+            LOG.info(f"Deleted legacy per-project network policy for project: {project_id}")
+        except client.ApiException as ex:
+            if ex.status != 404:
+                LOG.warn(f"got exception when creating per-project calico policy: {ex}")
+
+
 
     def create(self, context, container, image, requested_networks,
                requested_volumes):
