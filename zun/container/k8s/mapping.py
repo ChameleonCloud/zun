@@ -258,6 +258,27 @@ def deployment(container, image, requested_volumes=None, image_pull_secrets=None
     }
 
 
+def calico_project_permit_ns(project_id):
+    return_val = {
+        "metadata": {
+            "name": "default",
+            "namespace": project_id,
+        },
+        "spec": {
+            "order": 20,
+            "selector": "all()",
+            "types": ["Egress"],
+            "egress": [
+                {
+                    "action": "Allow",
+                    "destination": {"selector": "all()"}
+                },
+            ]
+        }
+    }
+    return return_val
+
+
 def calico_project_network_policy(project_id):
     return_val = {
         "metadata": {

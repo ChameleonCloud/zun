@@ -31,8 +31,7 @@ from zun.common import context as zun_context
 from zun.common import exception, utils
 from zun.common.docker_image import reference as docker_image
 from zun.container import driver
-from zun.container.k8s import exception as k8s_exc, host, mapping, network, volume
-from .calico import CalicoV3Api
+from zun.container.k8s import exception as k8s_exc, host, mapping, network, volume, calico
 
 CONF = zun.conf.CONF
 LOG = logging.getLogger(__name__)
@@ -82,7 +81,7 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
         self.apps_v1 = client.AppsV1Api()
         self.custom = client.CustomObjectsApi()
         self.net_v1 = client.NetworkingV1Api()
-        self.calico_v3 = CalicoV3Api()
+        self.calico_v3 = calico.CalicoV3Api()
 
         # self.network_api = zun_network.api(admin_context, self.net_v1)
         k8s_network = network.K8sNetwork()
@@ -155,7 +154,7 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
         First, create or update approprtiate calico network policy.
         Then, ensure legacy k8s policy is deleted.
         """
-        calico_default_policy = mapping.calico_project_network_policy(project_id)
+        calico_default_policy = mapping.calico_project_permit_ns(project_id)
         calico_default_policy_name = calico_default_policy["metadata"]["name"]
 
         try:
