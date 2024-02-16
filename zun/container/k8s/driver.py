@@ -217,6 +217,15 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
                 "K8s containers cannot be attached to Neutron networks, ignoring "
                 "requested_networks = %s"), requested_networks)
 
+        # Injecting env vars to mount nvidia cuda libraries and enable all nvidia
+        # compute modules onto containers if runtime nvidia is selected
+        if container.runtime == "nvidia":
+            if container.environment == None:
+                container.environment = {}
+            container.environment["NVIDIA_REQUIRE_JETPACK"] = "csv-mounts=all"
+            container.environment["NVIDIA_VISIBLE_DEVICES"] = "all"
+            container.environment["NVIDIA_DRIVER_CAPABILITIES"] = "all"
+
         def _create_deployment():
             secret_info_list = self._get_secrets_for_image(image["image"], context)
             self.apps_v1.create_namespaced_deployment(

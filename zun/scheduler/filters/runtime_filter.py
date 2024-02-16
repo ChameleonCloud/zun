@@ -19,21 +19,21 @@ from zun.scheduler import filters
 
 LOG = logging.getLogger(__name__)
 
-
+# Disabled on CHI@Edge v1.0 since not required when using k8s backend, only the k8s control plane is considered a host
 class RuntimeFilter(filters.BaseHostFilter):
     """Filter the containers by runtime"""
 
     run_filter_once_per_request = True
 
     def host_passes(self, host_state, container, extra_spec):
-        if not hasattr(container, 'runtime') or not container.runtime:
-            return True
+        # if not hasattr(container, 'runtime') or not container.runtime:
+        #     return True
 
-        if container.runtime not in host_state.runtimes:
-            LOG.debug("Runtime '%(container_runtime)s' requested. "
-                      "%(host_state)s has runtimes: %(host_runtime)s",
-                      {'host_state': host_state,
-                       'container_runtime': container.runtime,
-                       'host_runtime': host_state.runtimes})
-            return False
+        # if container.runtime not in host_state.runtimes:
+        #     LOG.debug("Runtime '%(container_runtime)s' requested. "
+        #               "%(host_state)s has runtimes: %(host_runtime)s",
+        #               {'host_state': host_state,
+        #                'container_runtime': container.runtime,
+        #                'host_runtime': host_state.runtimes})
+        #     return False
         return True
