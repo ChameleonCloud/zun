@@ -44,12 +44,15 @@ k8s_opts = [
                 'will lock up the K8s worker in the process.'
                )),
     cfg.StrOpt('nvidia_require_jetpack',
+               default="csv-mounts=all",
                help=('this variable gets injected into containers started with'
                      'the nvidia runtime, instructs the host to mount all the nvidia libraries')),
     cfg.StrOpt('nvidia_visible_devices',
+               default="all",
                help=('this variable gets injected into containers started with'
                      'the nvidia runtime, exposes all GPU devices on the host machine to the container')),
     cfg.StrOpt('nvidia_driver_capabilities',
+               default="all",
                help=('this variable gets injected into containers started with'
                      'the nvidia runtime, allows all Nvidia GPU driver modules to be used by the container')),
 ]
