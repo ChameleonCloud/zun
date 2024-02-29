@@ -222,9 +222,9 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
         if container.runtime == "nvidia":
             if container.environment == None:
                 container.environment = {}
-            container.environment["NVIDIA_REQUIRE_JETPACK"] = CONF.nvidia_environment.nvidia_require_jetpack
-            container.environment["NVIDIA_VISIBLE_DEVICES"] = CONF.nvidia_environment.nvidia_visible_devices
-            container.environment["NVIDIA_DRIVER_CAPABILITIES"] = CONF.nvidia_environment.nvidia_driver_capabilities
+            container.environment["NVIDIA_REQUIRE_JETPACK"] = CONF.k8s.nvidia_require_jetpack
+            container.environment["NVIDIA_VISIBLE_DEVICES"] = CONF.k8s.nvidia_visible_devices
+            container.environment["NVIDIA_DRIVER_CAPABILITIES"] = CONF.k8s.nvidia_driver_capabilities
 
         def _create_deployment():
             secret_info_list = self._get_secrets_for_image(image["image"], context)

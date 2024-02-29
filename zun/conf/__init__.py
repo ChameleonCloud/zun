@@ -30,7 +30,6 @@ from zun.conf import netconf
 from zun.conf import network
 from zun.conf import neutron
 from zun.conf import neutron_client
-from zun.conf import nvidia
 from zun.conf import path
 from zun.conf import pci
 from zun.conf import placement_client
@@ -62,7 +61,6 @@ zun_client.register_opts(CONF)
 ssl.register_opts(CONF)
 profiler.register_opts(CONF)
 neutron_client.register_opts(CONF)
-nvidia.register_opts(CONF)
 network.register_opts(CONF)
 websocket_proxy.register_opts(CONF)
 pci.register_opts(CONF)
