@@ -111,6 +111,16 @@ def namespace(container):
         }
     }
 
+def validate_taint(key, value, effect):
+    if not key or not isinstance(key, str):
+        raise ValueError("K8S Taint key must be a non-empty string")
+
+    if not value or not isinstance(value, str):
+        raise ValueError("K8S Taint value must be a non-empty string")
+
+    valid_effects = {"NoSchedule", "PreferNoSchedule", "NoExecute"}
+    if effect not in valid_effects:
+        raise ValueError(f"K8S Taint effect must be one of {valid_effects}")
 
 def deployment(container, image, requested_volumes=None, image_pull_secrets=None):
     resources = resources_request(container)
@@ -202,7 +212,7 @@ def deployment(container, image, requested_volumes=None, image_pull_secrets=None
     if image_pull_secrets:
         secrets_spec = [{"name": name} for name in image_pull_secrets]
 
-    return {
+    deployment_spec = {
         "metadata": {
             "name": name(container),
             "labels": deployment_labels,
@@ -262,6 +272,22 @@ def deployment(container, image, requested_volumes=None, image_pull_secrets=None
             },
         },
     }
+
+    if CONF.k8s.enable_worker_taint:
+        validate_taint(key=CONF.k8s.worker_taint_key,
+                       value=CONF.k8s.worker_taint_value,
+                       effect=CONF.k8s.worker_taint_effect)
+
+        toleration = {
+            "key": CONF.k8s.worker_taint_key,
+            "operator": "Equal",
+            "value": CONF.k8s.worker_taint_value,
+            "effect": CONF.k8s.worker_taint_effect
+            }
+
+        deployment_spec["spec"]["template"]["spec"]["tolerations"] = [toleration]
+
+    return deployment_spec
 
 
 def default_network_policy(project_id):

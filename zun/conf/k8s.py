@@ -55,6 +55,15 @@ k8s_opts = [
                default="all",
                help=('this variable gets injected into containers started with'
                      'the nvidia runtime, allows all Nvidia GPU driver modules to be used by the container')),
+    cfg.BoolOpt("enable_worker_taint",
+                default=False,
+                help="Enables the toleration of K8S worker node taint. A toleration for the taint will be added to every pod if set to True"),
+    cfg.StrOpt('worker_taint_key',
+               help="The key for the worker node taint to be tolerated"),
+    cfg.StrOpt('worker_taint_value',
+               help="The value for the worker node taint to be tolerated"),
+    cfg.StrOpt('worker_taint_effect',
+               help="The effect for the worker node taint to be tolerated"),
 ]
 
 ALL_OPTS = (k8s_opts)
