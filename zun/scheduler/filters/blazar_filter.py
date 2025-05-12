@@ -25,19 +25,6 @@ from zun.scheduler.client import report
 
 LOG = logging.getLogger(__name__)
 
-opts = [
-    cfg.BoolOpt('allow_without_reservation',
-                default=False,
-                help=('Whether to allow scheduling without '
-                      'having a reservation. If True, when scheduling '
-                      'a container without a reservation_id hint, '
-                      'the container can be scheduled to a host as '
-                      'long as the host is not explicitly reserved by '
-                      'any tenant.'))
-]
-
-cfg.CONF.register_opts(opts, 'blazar:host')
-
 BLAZAR_PLACEMENT_TRAIT_PATTERN = "^CUSTOM_RESERVATION_([A-Z0-9_]*)_PROJECT_([A-Z0-9_]*)$"
 
 

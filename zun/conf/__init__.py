@@ -16,6 +16,7 @@ from oslo_config import cfg
 
 from zun.conf import api
 from zun.conf import availability_zone
+from zun.conf import blazar
 from zun.conf import cinder_client
 from zun.conf import cni_daemon
 from zun.conf import compute
@@ -73,3 +74,4 @@ utils.register_opts(CONF)
 placement_client.register_opts(CONF)
 cni_daemon.register_opts(CONF)
 neutron.register_opts(CONF)
+blazar.register_opts(CONF)
