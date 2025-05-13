@@ -189,7 +189,12 @@ def deployment(container, image, requested_volumes=None, image_pull_secrets=None
         """ TODO: k8s driver does not currently support container launch without a reservation ID
         If permitted, containers can spawn on already reserved nodes.
         """
-        raise ReservationException(f"container {container.uuid} has no reservaton ID set.")
+
+        msg = "container %s has no reservaton ID set."
+        if CONF['blazar:host'].allow_without_reservation:
+            LOG.warn(msg, container.uuid)
+        else:
+            raise ReservationException(msg % container.uuid)
 
     volumes = []
     volume_mounts = []
