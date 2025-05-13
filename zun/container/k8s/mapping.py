@@ -232,17 +232,6 @@ def deployment(container, image, requested_volumes=None, image_pull_secrets=None
                     "labels": labels,
                 },
                 "spec": {
-                    "affinity": {
-                        "nodeAffinity": {
-                            "requiredDuringSchedulingIgnoredDuringExecution": {
-                                "nodeSelectorTerms": [
-                                    {
-                                        "matchExpressions": node_selector_expressions,
-                                    },
-                                ],
-                            },
-                        },
-                    },
                     "containers": [
                         {
                             "args": container.command,
@@ -277,6 +266,19 @@ def deployment(container, image, requested_volumes=None, image_pull_secrets=None
             },
         },
     }
+
+    if reservation_id:
+        deployment_spec["spec"]["template"]["spec"]["affinity"] = {
+            "nodeAffinity": {
+                "requiredDuringSchedulingIgnoredDuringExecution": {
+                    "nodeSelectorTerms": [
+                        {
+                            "matchExpressions": node_selector_expressions,
+                        },
+                    ],
+                },
+            },
+        }
 
     if CONF.k8s.enable_worker_taint:
         validate_taint(key=CONF.k8s.worker_taint_key,
