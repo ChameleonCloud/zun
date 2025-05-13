@@ -141,7 +141,8 @@ def deployment(container, image, requested_volumes=None, image_pull_secrets=None
             # No direct mapping for this in k8s
             "unless-stopped": "OnFailure",
         }
-        restart_policy = restart_policy_map.get(container.restart_policy["Name"])
+        restart_policy_request = restart_policy_map.get(container.restart_policy["Name"])
+        LOG.info("dropping restart policy %s for container %s, deployments only support \"ALWAYS\"", restart_policy_request, container.uuid)
 
     # The time unit in docker of heath checking is us, and the unit
     # of interval and timeout is seconds.
