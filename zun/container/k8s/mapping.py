@@ -3,6 +3,25 @@ from oslo_log import log as logging
 from zun.common import utils
 from zun.conf import CONF
 from zun.container.k8s.exception import ReservationException
+from kubernetes.client import (
+    V1Deployment,
+    V1Container,
+    V1DeploymentSpec,
+    V1LabelSelector,
+    V1PodTemplateSpec,
+    V1ObjectMeta,
+    V1PodSpec,
+    V1Affinity,
+    V1NodeAffinity,
+    V1NodeSelectorTerm,
+    V1NodeSelectorRequirement,
+    V1Toleration,
+    V1SecurityContext,
+    V1Volume,
+    V1VolumeMount,
+)
+
+from zun.objects.container import ContainerBase
 
 LABEL_NAMESPACE = "zun.openstack.org"
 LABELS = {
@@ -111,20 +130,110 @@ def namespace(container):
         }
     }
 
-def validate_taint(key, value, effect):
-    if not key or not isinstance(key, str):
-        raise ValueError("K8S Taint key must be a non-empty string")
 
-    if not value or not isinstance(value, str):
-        raise ValueError("K8S Taint value must be a non-empty string")
+def _reservation_node_selector(reservation_id: str, project_id: str):
+    return [
+        V1NodeSelectorRequirement(
+            key=LABELS["blazar_project_id"],
+            operator="In",
+            values=[project_id],
+        ),
+        V1NodeSelectorRequirement(
+            key=LABELS["blazar_reservation_id"],
+            operator="In",
+            values=[reservation_id],
+        ),
+    ]
 
-    valid_effects = {"NoSchedule", "PreferNoSchedule", "NoExecute"}
-    if effect not in valid_effects:
-        raise ValueError(f"K8S Taint effect must be one of {valid_effects}")
 
-def deployment(container, image, requested_volumes=None, image_pull_secrets=None):
+def _get_volumes(
+    volume_maps=[], mount_udev: bool = True
+) -> tuple[list[V1Volume], list[V1VolumeMount]]:
+    volumes = []
+    volume_mounts = []
+
+    for volmap in volume_maps:
+        # TODO: need to detect what the volume provider is and not use configmap
+        # in the 'volumes' configuration, instead use PersistentVolume claim.
+        vol_name = config_map_name(volmap)
+        volumes.append(V1Volume(name=vol_name, config_map={"name": vol_name}))
+        volume_mounts.append(
+            V1VolumeMount(
+                name=vol_name,
+                sub_path="file",  # We always store 1 binaryData key and it is 'file'
+                mount_path=volmap.container_path,
+            )
+        )
+
+    if mount_udev:
+        """Mount /run/udev read-only to fix libcamera."""
+
+        volumes.append(
+            {"name": "udev", "hostPath": {"path": "/run/udev", "type": "Directory"}}
+        )
+        volume_mounts.append(
+            {
+                "name": "udev",
+                "mountPath": "/run/udev",
+                "readOnly": True,
+            }
+        )
+
+    return volumes, volume_mounts
+
+
+def _get_node_selectors(
+    container: ContainerBase, 
+    deployment_labels: dict,
+    forbid_control_plane: bool = True,
+    reservation_required: bool = True
+) -> list[V1NodeSelectorRequirement]:
+    # Ensure user pods are never scheduled onto control plane infra
+    node_selector_expressions = []
+
+    if forbid_control_plane:
+        node_selector_expressions.append(
+            V1NodeSelectorRequirement(
+                key="node-role.kubernetes.io/control-plane",
+                operator="NotIn",
+                values=["true"],
+            )
+        )
+
+    if reservation_required:
+        reservation_id = container.annotations.get(utils.RESERVATION_ANNOTATION)
+        if reservation_id:
+            # Add the reservation ID to the deployment labels; this enables the reservation
+            # system to find the deployments tied to the reservation for cleanup.
+            deployment_labels[LABELS["blazar_reservation_id"]] = reservation_id
+            # Ensure the deployment lands on a reserved kubelet.
+            node_selector_expressions.extend(
+                _reservation_node_selector(
+                    reservation_id=reservation_id,
+                    project_id=container.project_id,
+                )
+            )
+        else:
+            """
+            TODO: k8s driver does not currently support a "mixed" mode. Only 
+            disable reservation requirement if no container hosts use reservations,
+            otherwise containers can spawn on already reserved nodes.
+            """
+            raise ReservationException(
+                f"blazar_reservation_required is True, and container {container.uuid} has no reservaton ID."
+            )
+
+    return node_selector_expressions
+
+
+def deployment(
+    container: ContainerBase,
+    image,
+    requested_volumes=[],
+    image_pull_secrets=None,
+):
     resources = resources_request(container)
-    labels = pod_labels(container)
+
     env = container_env(container)
     liveness_probe = restart_policy = None
 
@@ -158,162 +267,95 @@ def deployment(container, image, requested_volumes=None, image_pull_secrets=None
         LABELS["project_id"]: container.project_id,
     }
 
-    node_selector_expressions = []
-    if CONF.k8s.forbid_control_plane:
-        # Ensure user pods are never scheduled onto control plane infra
-        node_selector_expressions.append(
-            {
-                "key": "node-role.kubernetes.io/control-plane",
-                "operator": "NotIn",
-                "values": ["true"],
-            },
-        )
-
-    reservation_id = container.annotations.get(utils.RESERVATION_ANNOTATION)
-    if CONF.k8s.blazar_reservation_required:
-        if reservation_id:
-            # Add the reservation ID to the deployment labels; this enables the reservation
-            # system to find the deployments tied to the reservation for cleanup.
-            deployment_labels[LABELS["blazar_reservation_id"]] = reservation_id
-            # Ensure the deployment lands on a reserved kubelet.
-            node_selector_expressions.extend([
-                {
-                    "key": LABELS["blazar_project_id"],
-                    "operator": "In",
-                    "values": [container.project_id],
-                },
-                {
-                    "key": LABELS["blazar_reservation_id"],
-                    "operator": "In",
-                    "values": [reservation_id],
-                }
-            ])
-        else:
-            """
-            TODO: k8s driver does not currently support a "mixed" mode. Only 
-            disable reservation requirement if no container hosts use reservations,
-            otherwise containers can spawn on already reserved nodes.
-            """
-            raise ReservationException(f"blazar_reservation_required is True, and container {container.uuid} has no reservaton ID.")
-
-    volumes = []
-    volume_mounts = []
-
-    if CONF.k8s.mount_udev:
-        volume_mounts.append({
-            "name": "udev",
-            "mountPath": "/run/udev",
-            "readOnly": True,
-        })
-
-        volumes.append({
-            "name": "udev",
-            "hostPath": {
-                "path": "/run/udev",
-                "type": "Directory"
-            }
-        })
-
-    if requested_volumes:
-        for volmap in requested_volumes.get(container.uuid, []):
-            # TODO: need to detect what the volume provider is and not use configmap
-            # in the 'volumes' configuration, instead use PersistentVolume claim.
-            vol_name = config_map_name(volmap)
-            volume_mounts.append({
-                "name": vol_name,
-                "subPath": "file",  # We always store 1 binaryData key and it is 'file'
-                "mountPath": volmap.container_path,
-            })
-            volumes.append({
-                "name": vol_name,
-                "configMap": {"name": vol_name},
-            })
-
     secrets_spec = []
     if image_pull_secrets:
         secrets_spec = [{"name": name} for name in image_pull_secrets]
 
-    deployment_spec = {
-        "metadata": {
-            "name": name(container),
-            "labels": deployment_labels,
-        },
-        "spec": {
-            "replicas": 1,
-            "selector": {
-                "matchLabels": labels,
-            },
-            "template": {
-                "metadata": {
-                    "labels": labels,
-                },
-                "spec": {
-                    "containers": [
-                        {
-                            "args": container.command,
-                            # NOTE(jason): update in Xena when entrypoint exists.
-                            "command": getattr(container, "entrypoint", None),
-                            "env": env,
-                            "image": image_repo,
-                            "imagePullPolicy": "",
-                            "name": container.name,
-                            "ports": [
-                                {
-                                    "containerPort": port_spec["port"],
-                                    "protocol": port_spec["protocol"]
-                                } for port_spec in container_ports(container)
-                            ],
-                            "stdin": container.interactive,
-                            "tty": container.tty,
-                            "volumeDevices": [],
-                            "volumeMounts": volume_mounts,
-                            "workingDir": container.workdir,
-                            "resources": resources,
-                            "livenessProbe": liveness_probe,
-                        }
-                    ],
-                    "hostname": container.hostname,
-                    "nodeName": None, # Could be a specific node
-                    "volumes": volumes,
-                    "restartPolicy": restart_policy,
-                    "privileged": container.privileged,
-                    "imagePullSecrets": secrets_spec,
-                }
-            },
-        },
-    }
+    labels = pod_labels(container)
 
-    # if forbid_control_plane and blazar_reservation_required are false,
-    # this list will be empty. Setting afffinity to an empty list breaks
-    # scheduling
+    volumes, volume_mounts = _get_volumes(
+        volume_maps=requested_volumes.get(container.uuid, [])
+    )
+
+    node_selector_expressions = _get_node_selectors(
+        container=container, 
+        deployment_labels=deployment_labels,
+        forbid_control_plane=CONF.k8s.forbid_control_plane,
+        reservation_required=CONF.k8s.blazar_reservation_required,
+    )
+
+    deployment_metadata = V1ObjectMeta(
+        name=name(container),
+        labels=deployment_labels,
+    )
+
+    container_spec = V1Container(
+        args=container.command,
+        command=container.entrypoint,
+        env=env,
+        image=image_repo,
+        image_pull_policy=None,
+        name=container.name,
+        ports=[
+            {
+                "containerPort": port_spec["port"],
+                "protocol": port_spec["protocol"],
+            }
+            for port_spec in container_ports(container)
+        ],
+        stdin=container.interactive,
+        tty=container.tty,
+        volume_devices=[],
+        volume_mounts=volume_mounts,
+        working_dir=container.workdir,
+        resources=resources,
+        liveness_probe=liveness_probe,
+    )
     if node_selector_expressions:
-        deployment_spec["spec"]["template"]["spec"]["affinity"] = {
-            "nodeAffinity": {
-                "requiredDuringSchedulingIgnoredDuringExecution": {
-                    "nodeSelectorTerms": [
-                        {
-                            "matchExpressions": node_selector_expressions,
-                        },
-                    ],
-                },
-            }
-        }
-
+        affinity = V1Affinity(
+            node_affinity=V1NodeAffinity(
+                required_during_scheduling_ignored_during_execution=[
+                    V1NodeSelectorTerm(match_expressions=node_selector_expressions)
+                ]
+            )
+        )
+    else:
+        affinity=None
+    pod_tolerations = []
     if CONF.k8s.enable_worker_taint:
-        validate_taint(key=CONF.k8s.worker_taint_key,
-                       value=CONF.k8s.worker_taint_value,
-                       effect=CONF.k8s.worker_taint_effect)
+        pod_tolerations.append(
+            V1Toleration(
+                effect=CONF.k8s.worker_taint_effect,
+                operator="Equal",
+                key=CONF.k8s.worker_taint_key,
+                value=CONF.k8s.worker_taint_value,
+            )
+        )
+    pod_template = V1PodTemplateSpec(
+        metadata=V1ObjectMeta(labels=labels),
+        spec=V1PodSpec(
+            affinity=affinity,
+            containers=[container_spec],
+            hostname=container.hostname,
+            node_name=None,
+            volumes=volumes,
+            restart_policy=restart_policy,
+            image_pull_secrets=secrets_spec,
+            tolerations=pod_tolerations,
+            security_context=V1SecurityContext(privileged=container.privileged),
+        ),
+    )
 
-        toleration = {
-            "key": CONF.k8s.worker_taint_key,
-            "operator": "Equal",
-            "value": CONF.k8s.worker_taint_value,
-            "effect": CONF.k8s.worker_taint_effect
-            }
+    deployment = V1Deployment(
+        metadata=deployment_metadata,
+        spec=V1DeploymentSpec(
+            replicas=1,
+            selector=V1LabelSelector(match_labels=labels),
+            template=pod_template,
+        ),
+    )
 
-        deployment_spec["spec"]["template"]["spec"]["tolerations"] = [toleration]
-
-    return deployment_spec
+    return deployment
 
 
 def default_network_policy(project_id):
