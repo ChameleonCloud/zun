@@ -168,7 +168,8 @@ def deployment(container, image, requested_volumes=None, image_pull_secrets=None
     ]
 
     reservation_id = container.annotations.get(utils.RESERVATION_ANNOTATION)
-    if reservation_id:
+    if CONF.k8s.blazar_reservation_required:
+        if reservation_id:
         # Add the reservation ID to the deployment labels; this enables the reservation
         # system to find the deployments tied to the reservation for cleanup.
         deployment_labels[LABELS["blazar_reservation_id"]] = reservation_id
@@ -185,11 +186,13 @@ def deployment(container, image, requested_volumes=None, image_pull_secrets=None
                 "values": [reservation_id],
             }
         ])
-    else:
-        """ TODO: k8s driver does not currently support container launch without a reservation ID
-        If permitted, containers can spawn on already reserved nodes.
-        """
-        raise ReservationException(f"container {container.uuid} has no reservaton ID set.")
+        else:
+            """
+            TODO: k8s driver does not currently support a "mixed" mode. Only 
+            disable reservation requirement if no container hosts use reservations,
+            otherwise containers can spawn on already reserved nodes.
+            """
+            raise ReservationException(f"blazar_reservation_required is True, and container {container.uuid} has no reservaton ID.")
 
     volumes = []
     volume_mounts = []
