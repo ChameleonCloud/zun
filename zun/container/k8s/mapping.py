@@ -14,6 +14,7 @@ from kubernetes.client import (
     V1Affinity,
     V1NodeAffinity,
     V1NodeSelectorTerm,
+    V1NodeSelector,
     V1NodeSelectorRequirement,
     V1Toleration,
     V1SecurityContext,
@@ -22,6 +23,8 @@ from kubernetes.client import (
 )
 
 from zun.objects.container import ContainerBase
+
+from typing import Tuple, List
 
 LABEL_NAMESPACE = "zun.openstack.org"
 LABELS = {
@@ -148,7 +151,7 @@ def _reservation_node_selector(reservation_id: str, project_id: str):
 
 def _get_volumes(
     volume_maps=[], mount_udev: bool = True
-) -> tuple[list[V1Volume], list[V1VolumeMount]]:
+) -> Tuple[List[V1Volume], List[V1VolumeMount]]:
     volumes = []
     volume_mounts = []
 
@@ -187,7 +190,7 @@ def _get_node_selectors(
     deployment_labels: dict,
     forbid_control_plane: bool = True,
     reservation_required: bool = True
-) -> list[V1NodeSelectorRequirement]:
+) -> List[V1NodeSelectorRequirement]:
     # Ensure user pods are never scheduled onto control plane infra
     node_selector_expressions = []
 
@@ -314,10 +317,12 @@ def deployment(
     if node_selector_expressions:
         affinity = V1Affinity(
             node_affinity=V1NodeAffinity(
-                required_during_scheduling_ignored_during_execution=[
-                    V1NodeSelectorTerm(match_expressions=node_selector_expressions)
-                ]
-            )
+                required_during_scheduling_ignored_during_execution=V1NodeSelector(
+                node_selector_terms=[
+                        V1NodeSelectorTerm(match_expressions=node_selector_expressions)
+                    ]
+                )
+        )
         )
     else:
         affinity=None
