@@ -170,22 +170,22 @@ def deployment(container, image, requested_volumes=None, image_pull_secrets=None
     reservation_id = container.annotations.get(utils.RESERVATION_ANNOTATION)
     if CONF.k8s.blazar_reservation_required:
         if reservation_id:
-        # Add the reservation ID to the deployment labels; this enables the reservation
-        # system to find the deployments tied to the reservation for cleanup.
-        deployment_labels[LABELS["blazar_reservation_id"]] = reservation_id
-        # Ensure the deployment lands on a reserved kubelet.
-        node_selector_expressions.extend([
-            {
-                "key": LABELS["blazar_project_id"],
-                "operator": "In",
-                "values": [container.project_id],
-            },
-            {
-                "key": LABELS["blazar_reservation_id"],
-                "operator": "In",
-                "values": [reservation_id],
-            }
-        ])
+            # Add the reservation ID to the deployment labels; this enables the reservation
+            # system to find the deployments tied to the reservation for cleanup.
+            deployment_labels[LABELS["blazar_reservation_id"]] = reservation_id
+            # Ensure the deployment lands on a reserved kubelet.
+            node_selector_expressions.extend([
+                {
+                    "key": LABELS["blazar_project_id"],
+                    "operator": "In",
+                    "values": [container.project_id],
+                },
+                {
+                    "key": LABELS["blazar_reservation_id"],
+                    "operator": "In",
+                    "values": [reservation_id],
+                }
+            ])
         else:
             """
             TODO: k8s driver does not currently support a "mixed" mode. Only 
@@ -197,19 +197,20 @@ def deployment(container, image, requested_volumes=None, image_pull_secrets=None
     volumes = []
     volume_mounts = []
 
-    volume_mounts.append({
-        "name": "udev",
-        "mountPath": "/run/udev",
-        "readOnly": True,
-    })
+    if CONF.k8s.mount_udev:
+        volume_mounts.append({
+            "name": "udev",
+            "mountPath": "/run/udev",
+            "readOnly": True,
+        })
 
-    volumes.append({
-        "name": "udev",
-        "hostPath": {
-            "path": "/run/udev",
-            "type": "Directory"
-        }
-    })
+        volumes.append({
+            "name": "udev",
+            "hostPath": {
+                "path": "/run/udev",
+                "type": "Directory"
+            }
+        })
 
     if requested_volumes:
         for volmap in requested_volumes.get(container.uuid, []):

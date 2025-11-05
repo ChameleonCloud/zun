@@ -66,7 +66,12 @@ k8s_opts = [
                help="The effect for the worker node taint to be tolerated"),
     cfg.BoolOpt('blazar_reservation_required',
                help="Whether containers can be scheduled without a reservation; useful for shared hosts.",
-               default=True)
+               default=True),
+    cfg.BoolOpt(
+        "mount_udev",
+        help="If true, mount /run/udev:ro into each container, allowing service like libcamera to watch for device changes.",
+        default=False,
+    ),
 ]
 
 ALL_OPTS = (k8s_opts)
