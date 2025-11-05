@@ -3,7 +3,6 @@ from unittest import mock
 from zun.container.k8s.driver import K8sDriver, zun_context
 from zun.container.k8s.driver import config as k8s_config
 from zun.container.k8s.network import K8sNetwork as zun_k8s_network
-from zun.objects.container import Container as ZunContainer
 from zun.tests.unit.container import base
 
 FAKE_PROJECT_ID = "aaaa-bbb-ccc-ddd"
@@ -46,7 +45,6 @@ class TestK8sDriver(base.DriverTestCase):
         mock_image = mock.MagicMock()
 
         mock_container = mock.MagicMock(
-            spec_set=ZunContainer,
             project_id=FAKE_PROJECT_ID,
             exposed_ports=[],
         )
@@ -73,7 +71,6 @@ class TestK8sDriver(base.DriverTestCase):
         mock_image = mock.MagicMock()
 
         mock_container = mock.MagicMock(
-            spec_set=ZunContainer,
             project_id=FAKE_PROJECT_ID,
             exposed_ports=["8000/tcp"],
         )

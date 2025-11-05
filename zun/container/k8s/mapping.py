@@ -232,7 +232,7 @@ def _get_node_selectors(
 def deployment(
     container: ContainerBase,
     image,
-    requested_volumes=[],
+    requested_volumes={},
     image_pull_secrets=None,
 ):
     resources = resources_request(container)
