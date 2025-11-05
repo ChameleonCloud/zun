@@ -281,6 +281,7 @@ def deployment(container, image, requested_volumes=None, image_pull_secrets=None
                 }
             },
         },
+    }
 
     # if forbid_control_plane and blazar_reservation_required are false,
     # this list will be empty. Setting afffinity to an empty list breaks
