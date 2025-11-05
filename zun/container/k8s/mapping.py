@@ -158,14 +158,16 @@ def deployment(container, image, requested_volumes=None, image_pull_secrets=None
         LABELS["project_id"]: container.project_id,
     }
 
-    # Ensure user pods are never scheduled onto control plane infra
-    node_selector_expressions = [
-        {
-            "key": "node-role.kubernetes.io/control-plane",
-            "operator": "NotIn",
-            "values": ["true"]
-        },
-    ]
+    node_selector_expressions = []
+    if CONF.k8s.forbid_control_plane:
+        # Ensure user pods are never scheduled onto control plane infra
+        node_selector_expressions.append(
+            {
+                "key": "node-role.kubernetes.io/control-plane",
+                "operator": "NotIn",
+                "values": ["true"],
+            },
+        )
 
     reservation_id = container.annotations.get(utils.RESERVATION_ANNOTATION)
     if CONF.k8s.blazar_reservation_required:
@@ -246,17 +248,6 @@ def deployment(container, image, requested_volumes=None, image_pull_secrets=None
                     "labels": labels,
                 },
                 "spec": {
-                    "affinity": {
-                        "nodeAffinity": {
-                            "requiredDuringSchedulingIgnoredDuringExecution": {
-                                "nodeSelectorTerms": [
-                                    {
-                                        "matchExpressions": node_selector_expressions,
-                                    },
-                                ],
-                            },
-                        },
-                    },
                     "containers": [
                         {
                             "args": container.command,
@@ -290,7 +281,22 @@ def deployment(container, image, requested_volumes=None, image_pull_secrets=None
                 }
             },
         },
-    }
+
+    # if forbid_control_plane and blazar_reservation_required are false,
+    # this list will be empty. Setting afffinity to an empty list breaks
+    # scheduling
+    if node_selector_expressions:
+        deployment_spec["spec"]["template"]["spec"]["affinity"] = {
+            "nodeAffinity": {
+                "requiredDuringSchedulingIgnoredDuringExecution": {
+                    "nodeSelectorTerms": [
+                        {
+                            "matchExpressions": node_selector_expressions,
+                        },
+                    ],
+                },
+            }
+        }
 
     if CONF.k8s.enable_worker_taint:
         validate_taint(key=CONF.k8s.worker_taint_key,

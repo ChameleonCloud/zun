@@ -72,6 +72,11 @@ k8s_opts = [
         help="If true, mount /run/udev:ro into each container, allowing service like libcamera to watch for device changes.",
         default=False,
     ),
+    cfg.BoolOpt(
+        "forbid_control_plane",
+        help="If true, prevent user containers from launching on control plane nodes.",
+        default=True,
+    ),
 ]
 
 ALL_OPTS = (k8s_opts)
