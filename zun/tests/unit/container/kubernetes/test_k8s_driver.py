@@ -287,3 +287,26 @@ class TestK8sDriver(base.DriverTestCase):
 
         self.assertEqual(consts.CREATING, container.status)
         container.save.assert_not_called()
+
+    def test_update_containers_states_does_not_delete_stopped_container_without_pod(self):
+        """
+        For a "stopped" zun container, we expect a deployment to be present with scale=0.
+        This means that there may be no matching "pod", but there WILL be a matching
+        deployment.
+        """
+        self.config(host="test-host")
+
+        container = mock.MagicMock(
+            spec_set=ZunContainer,
+            uuid="33333333-3333-3333-3333-333333333333",
+            host=CONF.host,
+            status=consts.STOPPED,
+            task_state=None,
+        )
+
+        with mock.patch.object(self.driver, "_pod_for_container", return_value=None) as mock_pod:
+            self.driver.update_containers_states(self.context, [container], mock.Mock())
+
+        mock_pod.assert_called_once_with(self.context, container)
+        self.assertEqual(consts.STOPPED, container.status)
+        container.save.assert_not_called()
