@@ -5,6 +5,8 @@ from zun.container.k8s.driver import config as k8s_config
 from zun.container.k8s.network import K8sNetwork as zun_k8s_network
 from zun.objects.container import Container as ZunContainer
 from zun.tests.unit.container import base
+from zun.conf import CONF
+from zun.common import consts
 
 FAKE_PROJECT_ID = "aaaa-bbb-ccc-ddd"
 
@@ -36,6 +38,7 @@ class TestK8sDriver(base.DriverTestCase):
             self.driver.net_v1, "create_namespaced_network_policy"
         ).start()
 
+class TestK8sDriverActions(TestK8sDriver):
     def test_create(self):
         """Test container create method.
 
@@ -235,3 +238,101 @@ class TestK8sDriver(base.DriverTestCase):
             self.driver.inspect_network,
             network=network,
         )
+
+
+class TestUpdateContainersStates(TestK8sDriver):
+
+    def setUp(self):
+        super().setUp()
+
+        # Set "host" so we act as a specific service, used for syncronization checks.
+        self.config(host="test-host")
+
+
+    def test_deletes_when_deployment_missing(self):
+        """
+        When a k8s zun container IS present, and a k8s deployment is NOT
+        Then assume there was a deletion in the background, and delete the zun
+        container.
+
+        This is most often triggered by blazar lease end.
+        """
+
+        container = mock.MagicMock(
+            spec_set=ZunContainer,
+            uuid="11111111-1111-1111-1111-111111111111",
+            host=CONF.host,
+            status=consts.RUNNING,
+            task_state=None,
+        )
+
+        with mock.patch.object(self.driver, "_deployment_map", return_value={}) as mock_deployment:
+            self.driver.update_containers_states(self.context, [container], mock.Mock())
+            mock_deployment.assert_called_once()
+
+
+        self.assertEqual(consts.DELETED, container.status)
+        container.save.assert_called_once_with(self.context)
+
+    def test_creating_not_deleted_when_deployment_missing(self):
+        """
+        Skip deletion if container still "creating", deployment might not be made yet.
+        """
+        self.config(host="test-host")
+
+        container = mock.MagicMock(
+            spec_set=ZunContainer,
+            uuid="22222222-2222-2222-2222-222222222222",
+            host=CONF.host,
+            status=consts.CREATING,
+            task_state=None,
+        )
+
+        with mock.patch.object(self.driver, "_deployment_map", return_value={}) as mock_deployment:
+            self.driver.update_containers_states(self.context, [container], mock.Mock())
+            mock_deployment.assert_called_once()
+
+        self.assertEqual(consts.CREATING, container.status)
+        container.save.assert_not_called()
+
+    def test_stopped_not_deleted_when_deployment_present(self):
+        """
+        For a "stopped" zun container, we expect a deployment to be present with scale=0.
+        This means that there may be no matching "pod", but there WILL be a matching
+        deployment.
+        """
+        self.config(host="test-host")
+
+        container = mock.MagicMock(
+            spec_set=ZunContainer,
+            uuid="33333333-3333-3333-3333-333333333333",
+            host=CONF.host,
+            status=consts.STOPPED,
+            task_state=None,
+        )
+
+        deployments = {container.uuid: mock.MagicMock()}
+
+
+        with mock.patch.object(self.driver, "_deployment_map", return_value=deployments) as mock_deployment:
+            self.driver.update_containers_states(self.context, [container], mock.Mock())
+            mock_deployment.assert_called_once()
+
+        self.assertEqual(consts.STOPPED, container.status)
+        container.save.assert_not_called()
+
+    def test_skips_when_task_state_set(self):
+        """Ensure we don't delete if task_state != none, k8s still in progress."""
+        container = mock.MagicMock(
+            spec_set=ZunContainer,
+            uuid="44444444-4444-4444-4444-444444444444",
+            host=CONF.host,
+            status=consts.RUNNING,
+            task_state=consts.CONTAINER_CREATING,
+        )
+
+        with mock.patch.object(self.driver, "_deployment_map", return_value={}):
+            self.driver.update_containers_states(self.context, [container], mock.Mock())
+
+        self.assertEqual(consts.RUNNING, container.status)
+        container.save.assert_not_called()
