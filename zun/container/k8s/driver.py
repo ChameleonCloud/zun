@@ -505,8 +505,8 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
                 if not self._pod_for_container(context, container):
                     LOG.info("zun manager requests sync to delete container {}".format(container))
                     LOG.warning("DRY RUN: couldn't find k8s pod for container {} during sync, deleting!.".format(container.uuid))
-                    # container.status = consts.DELETED
-                    # container.save(context)
+                    container.status = consts.DELETED
+                    container.save(context)
 
     def show(self, context, container):
         """Show the details of a container."""

@@ -5,6 +5,8 @@ from zun.container.k8s.driver import config as k8s_config
 from zun.container.k8s.network import K8sNetwork as zun_k8s_network
 from zun.objects.container import Container as ZunContainer
 from zun.tests.unit.container import base
+from zun.conf import CONF
+from zun.common import consts
 
 FAKE_PROJECT_ID = "aaaa-bbb-ccc-ddd"
 
@@ -235,3 +237,53 @@ class TestK8sDriver(base.DriverTestCase):
             self.driver.inspect_network,
             network=network,
         )
+
+    def test_update_containers_states_deletes_missing_running_container(self):
+        """
+        Test case for issue where zun periodic sync and k8s watch-based sync conflict.
+        The intent is that if a container is "missing" on the k8s side, the zun side
+        will be marked as deleted to clean it up.
+        """
+        self.config(host="test-host")
+
+        container = mock.MagicMock(
+            spec_set=ZunContainer,
+            uuid="11111111-1111-1111-1111-111111111111",
+            host=CONF.host,
+            status=consts.RUNNING,
+            task_state=None,
+        )
+
+        with mock.patch.object(self.driver, "_pod_for_container", return_value=None) as mock_pod:
+            #_pod_for_container returns none -> container present in zun, missing on k8s side
+            self.driver.update_containers_states(self.context, [container], mock.Mock())
+            mock_pod.assert_called_once_with(self.context, container)
+
+
+        self.assertEqual(consts.DELETED, container.status)
+        container.save.assert_called_once_with(self.context)
+
+    def test_update_containers_states_does_not_delete_creating_container(self):
+        """
+        Test case for issue where zun periodic sync and k8s watch-based sync conflict.
+        Similar to test_update_containers_states_deletes_missing_running_container.
+
+        The intent here is that if a container is "creating", e.g. on the k8s
+        side, the deployment exists, but the pod does not yet exist, we prevent
+        zun from acting on the "missing" container.
+        """
+        self.config(host="test-host")
+
+        container = mock.MagicMock(
+            spec_set=ZunContainer,
+            uuid="22222222-2222-2222-2222-222222222222",
+            host=CONF.host,
+            status=consts.CREATING,
+            task_state=None,
+        )
+
+        with mock.patch.object(self.driver, "_pod_for_container", return_value=None):
+            self.driver.update_containers_states(self.context, [container], mock.Mock())
+
+        self.assertEqual(consts.CREATING, container.status)
+        container.save.assert_not_called()
