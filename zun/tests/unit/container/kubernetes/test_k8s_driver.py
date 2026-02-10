@@ -249,7 +249,7 @@ class TestUpdateContainersStates(TestK8sDriver):
         self.config(host="test-host")
 
 
-    def test_update_states_deletes_when_deployment_missing(self):
+    def test_deletes_when_deployment_missing(self):
         """
         When a k8s zun container IS present, and a k8s deployment is NOT
         Then assume there was a deletion in the background, and delete the zun
@@ -274,14 +274,9 @@ class TestUpdateContainersStates(TestK8sDriver):
         self.assertEqual(consts.DELETED, container.status)
         container.save.assert_called_once_with(self.context)
 
-    def test_update_containers_states_does_not_delete_creating_container(self):
+    def test_creating_not_deleted_when_deployment_missing(self):
         """
-        Test case for issue where zun periodic sync and k8s watch-based sync conflict.
-        Similar to test_update_containers_states_deletes_missing_running_container.
-
-        The intent here is that if a container is "creating", e.g. on the k8s
-        side, the deployment exists, but the pod does not yet exist, we prevent
-        zun from acting on the "missing" container.
+        Skip deletion if container still "creating", deployment might not be made yet.
         """
         self.config(host="test-host")
 
@@ -300,7 +295,7 @@ class TestUpdateContainersStates(TestK8sDriver):
         self.assertEqual(consts.CREATING, container.status)
         container.save.assert_not_called()
 
-    def test_update_containers_states_does_not_delete_stopped_container_without_pod(self):
+    def test_stopped_not_deleted_when_deployment_present(self):
         """
         For a "stopped" zun container, we expect a deployment to be present with scale=0.
         This means that there may be no matching "pod", but there WILL be a matching
@@ -324,4 +319,20 @@ class TestUpdateContainersStates(TestK8sDriver):
             mock_deployment.assert_called_once()
 
         self.assertEqual(consts.STOPPED, container.status)
+        container.save.assert_not_called()
+
+    def test_skips_when_task_state_set(self):
+        """Ensure we don't delete if task_state != none, k8s still in progress."""
+        container = mock.MagicMock(
+            spec_set=ZunContainer,
+            uuid="44444444-4444-4444-4444-444444444444",
+            host=CONF.host,
+            status=consts.RUNNING,
+            task_state=consts.CONTAINER_CREATING,
+        )
+
+        with mock.patch.object(self.driver, "_deployment_map", return_value={}):
+            self.driver.update_containers_states(self.context, [container], mock.Mock())
+
+        self.assertEqual(consts.RUNNING, container.status)
         container.save.assert_not_called()
