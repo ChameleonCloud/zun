@@ -38,6 +38,7 @@ class TestK8sDriver(base.DriverTestCase):
             self.driver.net_v1, "create_namespaced_network_policy"
         ).start()
 
+class TestK8sDriverActions(TestK8sDriver):
     def test_create(self):
         """Test container create method.
 
