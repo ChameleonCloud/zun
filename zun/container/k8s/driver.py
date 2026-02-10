@@ -501,10 +501,14 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
                 # should be handling updates for it).
                 continue
 
+            if container.host == CONF.host and container.status==consts.CREATING:
+                LOG.info("Skipping deletion check for container {}, still CREATING".format(container))
+                continue
+
             if container.host == CONF.host and container.status!=consts.DELETED:
                 if not self._pod_for_container(context, container):
-                    LOG.info("zun manager requests sync to delete container {}".format(container))
-                    LOG.warning("DRY RUN: couldn't find k8s pod for container {} during sync, deleting!.".format(container.uuid))
+                    
+                    LOG.warning("Pod not found during sync, conflicting with zun cached state. Deleting zun container {}".format(container.uuid))
                     container.status = consts.DELETED
                     container.save(context)
 
