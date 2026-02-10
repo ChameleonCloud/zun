@@ -484,6 +484,16 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
 
         return local_containers, non_existent_containers
 
+    def _deployment_map(self):
+        """
+        Fetch all deployments and return map of zun container uuid -> deployment id.
+        """
+        deployment_list = self.apps_v1().list_deployment_for_all_namespaces(
+            label_selector=mapping.LABELS["uuid"])
+        return {
+            d.metadata.labels[mapping.LABELS["uuid"]]: d
+            for d in deployment_list.items
+        }
 
     def update_containers_states(self, context, containers, manager):
         """Called by zun manager, periodically sync all containers states.
@@ -494,23 +504,34 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
         """
         # TODO(jason): sync security group net policies (?)
 
+        # Fetch updated deployments once per sync.
+        deployment_map = self._deployment_map()
+        
         for container in containers:
+            
+            deployment = deployment_map.get(container.uuid)
 
+            if container.host != CONF.host:
+                # Only act on containers we're responsible for
+                continue
+            
             if container.task_state is not None:
-                # Container is in the middle of an operation; let it finish (the watcher
-                # should be handling updates for it).
+                # Container is in the middle of an operation; let it finish
+                #  (the watcher should be handling updates for it).
                 continue
-
-            if container.host == CONF.host and container.status==consts.CREATING:
-                LOG.info("Skipping deletion check for container {}, still CREATING".format(container))
+            
+            if container.status==consts.DELETED:
+                # container is already deleted, leave the item around for reference.
                 continue
-
-            if container.host == CONF.host and container.status!=consts.DELETED:
-                if not self._pod_for_container(context, container):
-                    
-                    LOG.warning("Pod not found during sync, conflicting with zun cached state. Deleting zun container {}".format(container.uuid))
-                    container.status = consts.DELETED
-                    container.save(context)
+            
+            if container.status==consts.CREATING:
+                # container is still creating, we'll wait until that finishes
+                continue
+            
+            if not deployment:
+                LOG.warning("Deleting orphaned container; During sync, deployment not found for zun container {}".format(container.uuid))
+                container.status = consts.DELETED
+                container.save(context)
 
     def show(self, context, container):
         """Show the details of a container."""

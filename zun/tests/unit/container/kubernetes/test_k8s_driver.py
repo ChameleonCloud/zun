@@ -238,13 +238,24 @@ class TestK8sDriver(base.DriverTestCase):
             network=network,
         )
 
-    def test_update_containers_states_deletes_missing_running_container(self):
-        """
-        Test case for issue where zun periodic sync and k8s watch-based sync conflict.
-        The intent is that if a container is "missing" on the k8s side, the zun side
-        will be marked as deleted to clean it up.
-        """
+
+class TestUpdateContainersStates(TestK8sDriver):
+
+    def setUp(self):
+        super().setUp()
+
+        # Set "host" so we act as a specific service, used for syncronization checks.
         self.config(host="test-host")
+
+
+    def test_update_states_deletes_when_deployment_missing(self):
+        """
+        When a k8s zun container IS present, and a k8s deployment is NOT
+        Then assume there was a deletion in the background, and delete the zun
+        container.
+
+        This is most often triggered by blazar lease end.
+        """
 
         container = mock.MagicMock(
             spec_set=ZunContainer,
@@ -254,10 +265,9 @@ class TestK8sDriver(base.DriverTestCase):
             task_state=None,
         )
 
-        with mock.patch.object(self.driver, "_pod_for_container", return_value=None) as mock_pod:
-            #_pod_for_container returns none -> container present in zun, missing on k8s side
+        with mock.patch.object(self.driver, "_deployment_map", return_value={}) as mock_deployment:
             self.driver.update_containers_states(self.context, [container], mock.Mock())
-            mock_pod.assert_called_once_with(self.context, container)
+            mock_deployment.assert_called_once()
 
 
         self.assertEqual(consts.DELETED, container.status)
@@ -282,8 +292,9 @@ class TestK8sDriver(base.DriverTestCase):
             task_state=None,
         )
 
-        with mock.patch.object(self.driver, "_pod_for_container", return_value=None):
+        with mock.patch.object(self.driver, "_deployment_map", return_value={}) as mock_deployment:
             self.driver.update_containers_states(self.context, [container], mock.Mock())
+            mock_deployment.assert_called_once()
 
         self.assertEqual(consts.CREATING, container.status)
         container.save.assert_not_called()
@@ -304,9 +315,12 @@ class TestK8sDriver(base.DriverTestCase):
             task_state=None,
         )
 
-        with mock.patch.object(self.driver, "_pod_for_container", return_value=None) as mock_pod:
-            self.driver.update_containers_states(self.context, [container], mock.Mock())
+        deployments = {container.uuid: mock.MagicMock()}
 
-        mock_pod.assert_called_once_with(self.context, container)
+
+        with mock.patch.object(self.driver, "_deployment_map", return_value=deployments) as mock_deployment:
+            self.driver.update_containers_states(self.context, [container], mock.Mock())
+            mock_deployment.assert_called_once()
+
         self.assertEqual(consts.STOPPED, container.status)
         container.save.assert_not_called()
