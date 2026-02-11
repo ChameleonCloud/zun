@@ -109,6 +109,25 @@ def _format_status_detail(status_detail):
 
     return result
 
+
+_TERMINAL_IMAGE_PULL_REASONS = (
+    "ErrImagePull",
+    "InvalidImageName",
+)
+
+
+def _image_pull_error_message(waiting_message, image_ref):
+    hint = (
+        "Image pull failed. Verify image name/tag and registry access. "
+        "Small typos matter (for example '_' vs '-')."
+    )
+    if image_ref:
+        hint = f"{hint} image='{image_ref}'."
+    if waiting_message:
+        return f"{waiting_message} {hint}"
+    return hint
+
+
 def _pod_ips(pod):
     if not pod.status.pod_i_ps:
         return []
@@ -388,8 +407,21 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
                 schedule_condition.reason == "Unschedulable"):
                 fail_due_to_condition(schedule_condition)
                 return
-            else:
-                transition_status(consts.CREATING)
+
+            # Handle image pull failures
+            statuses = pod_status.container_statuses or []
+            waiting = statuses[0].state.waiting if statuses and statuses[0].state else None
+            if waiting and waiting.reason in _TERMINAL_IMAGE_PULL_REASONS:
+                containers = pod.spec.containers if pod.spec else []
+                image_ref = containers[0].image if containers else None
+                container.status = consts.ERROR
+                container.task_state = None     # sync logic checks for this
+                container.status_detail = _format_status_detail(waiting.reason)
+                container.status_reason = _image_pull_error_message(
+                    waiting.message, image_ref)
+                return
+
+            transition_status(consts.CREATING)
         elif pod_status.phase == "Running":
             # The pod has been created. The container under the pod may however still
             # be having trouble starting.
