@@ -382,6 +382,14 @@ class TestSyncContainerImagePullErrors(TestK8sDriver):
         return pod
 
     def test_pending_terminal_image_pull_reasons_fail_fast(self):
+        """This is actually complicated...
+
+        We can't set to error, because error implies a terminal case.
+        These image statuses are not necessarily terminal.
+
+        Instead, just set status reason and status detail, but leave in creating.
+        Separate logic should handle failing due to timeout or retries.
+        """
         image_ref = "ghcr.io/chameleoncloud/edge_sensehat_image:latest"
         for waiting_reason in _TERMINAL_IMAGE_PULL_REASONS:
             with self.subTest(waiting_reason=waiting_reason):
@@ -394,8 +402,8 @@ class TestSyncContainerImagePullErrors(TestK8sDriver):
 
                 self.driver._sync_container(container, pod)
 
-                self.assertEqual(consts.ERROR, container.status)
+                # Still creating, but has the status detail and reason
+                self.assertEqual(consts.CREATING, container.status)
                 self.assertEqual(waiting_reason, container.status_detail)
                 self.assertIn("failed to resolve reference", container.status_reason)
                 self.assertIn(image_ref, container.status_reason)
-                self.assertIsNone(container.task_state)

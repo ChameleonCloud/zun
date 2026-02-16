@@ -110,9 +110,10 @@ def _format_status_detail(status_detail):
     return result
 
 
-_TERMINAL_IMAGE_PULL_REASONS = (
+_IMAGE_PULL_STATUSES = (
     "ErrImagePull",
     "InvalidImageName",
+    "ImagePullBackOff"
 )
 
 
@@ -408,14 +409,14 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
                 fail_due_to_condition(schedule_condition)
                 return
 
-            # Handle image pull failures
+            # Handle image pull failures. These aren't always terminal, so don't 
+            # set container.status = consts.ERROR
             statuses = pod_status.container_statuses or []
             waiting = statuses[0].state.waiting if statuses and statuses[0].state else None
-            if waiting and waiting.reason in _TERMINAL_IMAGE_PULL_REASONS:
+            if waiting and waiting.reason in _IMAGE_PULL_STATUSES:
                 containers = pod.spec.containers if pod.spec else []
                 image_ref = containers[0].image if containers else None
-                container.status = consts.ERROR
-                container.task_state = None     # sync logic checks for this
+                # update status detail and reason while we try.
                 container.status_detail = _format_status_detail(waiting.reason)
                 container.status_reason = _image_pull_error_message(
                     waiting.message, image_ref)
