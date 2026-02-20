@@ -117,17 +117,6 @@ _IMAGE_PULL_STATUSES = (
 )
 
 
-def _image_pull_error_message(waiting_message, image_ref):
-    hint = (
-        "Image pull failed. Verify image name/tag and registry access. "
-        "Small typos matter (for example '_' vs '-')."
-    )
-    if image_ref:
-        hint = f"{hint} image='{image_ref}'."
-    if waiting_message:
-        return f"{waiting_message} {hint}"
-    return hint
-
 
 def _pod_ips(pod):
     if not pod.status.pod_i_ps:
@@ -418,8 +407,7 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
                 image_ref = containers[0].image if containers else None
                 # update status detail and reason while we try.
                 container.status_detail = _format_status_detail(waiting.reason)
-                container.status_reason = _image_pull_error_message(
-                    waiting.message, image_ref)
+                container.status_reason = waiting.message
                 return
 
             transition_status(consts.CREATING)
