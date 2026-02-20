@@ -337,17 +337,16 @@ class TestUpdateContainersStates(TestK8sDriver):
         self.assertEqual(consts.RUNNING, container.status)
         container.save.assert_not_called()
 
-_TERMINAL_IMAGE_PULL_REASONS = (
+_IMAGE_PULL_STATUSES = (
     "ErrImagePull",
     "InvalidImageName",
+    "ImagePullBackOff",
 )
 
 class TestSyncContainerImagePullErrors(TestK8sDriver):
-
     def setUp(self):
         super().setUp()
         self.driver.network_driver = mock.MagicMock()
-    
 
     def _creating_container(self):
         return mock.MagicMock(
@@ -360,19 +359,25 @@ class TestSyncContainerImagePullErrors(TestK8sDriver):
         pod = mock.MagicMock()
         pod.status = mock.MagicMock(
             phase="Pending",
-            conditions=[mock.MagicMock(
-                type="PodScheduled",
-                status="True",
-                reason="Scheduled",
-                message="pod scheduled",
-            )],
-            container_statuses=[mock.MagicMock(
-                state=mock.MagicMock(waiting=mock.MagicMock(
-                    reason=waiting_reason,
-                    message=waiting_message,
-                )),
-                restart_count=0,
-            )],
+            conditions=[
+                mock.MagicMock(
+                    type="PodScheduled",
+                    status="True",
+                    reason="Scheduled",
+                    message="pod scheduled",
+                )
+            ],
+            container_statuses=[
+                mock.MagicMock(
+                    state=mock.MagicMock(
+                        waiting=mock.MagicMock(
+                            reason=waiting_reason,
+                            message=waiting_message,
+                        )
+                    ),
+                    restart_count=0,
+                )
+            ],
             reason=None,
             message=None,
         )
@@ -391,7 +396,7 @@ class TestSyncContainerImagePullErrors(TestK8sDriver):
         Separate logic should handle failing due to timeout or retries.
         """
         image_ref = "ghcr.io/chameleoncloud/edge_sensehat_image:latest"
-        for waiting_reason in _TERMINAL_IMAGE_PULL_REASONS:
+        for waiting_reason in _IMAGE_PULL_STATUSES:
             with self.subTest(waiting_reason=waiting_reason):
                 container = self._creating_container()
                 pod = self._pending_pod(
@@ -405,5 +410,4 @@ class TestSyncContainerImagePullErrors(TestK8sDriver):
                 # Still creating, but has the status detail and reason
                 self.assertEqual(consts.CREATING, container.status)
                 self.assertEqual(waiting_reason, container.status_detail)
-                self.assertIn("failed to resolve reference", container.status_reason)
-                self.assertIn(image_ref, container.status_reason)
+                self.assertEqual("failed to resolve reference: not found", container.status_reason)
