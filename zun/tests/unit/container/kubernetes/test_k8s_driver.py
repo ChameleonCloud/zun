@@ -336,3 +336,78 @@ class TestUpdateContainersStates(TestK8sDriver):
 
         self.assertEqual(consts.RUNNING, container.status)
         container.save.assert_not_called()
+
+_IMAGE_PULL_STATUSES = (
+    "ErrImagePull",
+    "InvalidImageName",
+    "ImagePullBackOff",
+)
+
+class TestSyncContainerImagePullErrors(TestK8sDriver):
+    def setUp(self):
+        super().setUp()
+        self.driver.network_driver = mock.MagicMock()
+
+    def _creating_container(self):
+        return mock.MagicMock(
+            spec_set=ZunContainer,
+            status=consts.CREATING,
+            task_state=consts.CONTAINER_CREATING,
+        )
+
+    def _pending_pod(self, waiting_reason, waiting_message, image_ref):
+        pod = mock.MagicMock()
+        pod.status = mock.MagicMock(
+            phase="Pending",
+            conditions=[
+                mock.MagicMock(
+                    type="PodScheduled",
+                    status="True",
+                    reason="Scheduled",
+                    message="pod scheduled",
+                )
+            ],
+            container_statuses=[
+                mock.MagicMock(
+                    state=mock.MagicMock(
+                        waiting=mock.MagicMock(
+                            reason=waiting_reason,
+                            message=waiting_message,
+                        )
+                    ),
+                    restart_count=0,
+                )
+            ],
+            reason=None,
+            message=None,
+        )
+        pod.spec = mock.MagicMock(
+            containers=[mock.MagicMock(image=image_ref)],
+        )
+        return pod
+
+    def test_pending_terminal_image_pull_reasons_fail_fast(self):
+        """This is actually complicated...
+
+        We can't set to error, because error implies a terminal case.
+        These image statuses are not necessarily terminal.
+
+        Instead, just set status reason and status detail, but leave in creating.
+        Separate logic should handle failing due to timeout or retries.
+        """
+        image_ref = "ghcr.io/chameleoncloud/edge_sensehat_image:latest"
+        for waiting_reason in _IMAGE_PULL_STATUSES:
+            with self.subTest(waiting_reason=waiting_reason):
+                container = self._creating_container()
+                pod = self._pending_pod(
+                    waiting_reason=waiting_reason,
+                    waiting_message="failed to resolve reference: not found",
+                    image_ref=image_ref,
+                )
+
+                self.driver._sync_container(container, pod)
+
+                # Still creating, but has the status detail and reason
+                self.assertEqual(consts.CREATING, container.status)
+                self.assertEqual(waiting_reason, container.status_detail)
+                self.assertEqual("failed to resolve reference: not found", container.status_reason)
