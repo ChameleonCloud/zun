@@ -77,6 +77,37 @@ def names(self, names):
 # with the "names" defined above
 V1ContainerImage.names = V1ContainerImage.names.setter(names)
 
+# HACK
+# eventlet.monkey_patch() (zun.cmd) removes select.poll(), but WSClient.update()
+#  calls it, crashing kubernetes.stream. Replace with # select.select()
+def _select_update(self, timeout=0):
+    if not self.is_open():
+        return
+    if not self.sock.connected:
+        self._connected = False
+        return
+    r, _, _ = select.select((self.sock.sock, ), (), (), timeout)
+    if r:
+        op_code, frame = self.sock.recv_data_frame(True)
+        if op_code == ABNF.OPCODE_CLOSE:
+            self._connected = False
+        elif op_code == ABNF.OPCODE_BINARY or op_code == ABNF.OPCODE_TEXT:
+            data = frame.data.decode("utf-8", "replace")
+            if len(data) > 1:
+                channel = ord(data[0])
+                data = data[1:]
+                if data:
+                    if channel in (STDOUT_CHANNEL, STDERR_CHANNEL):
+                        # keeping all messages in the order they received
+                        # for non-blocking call.
+                        self._all.write(data)
+                    if channel not in self._channels:
+                        self._channels[channel] = data
+                    else:
+                        self._channels[channel] += data
+
+WSClient.update = _select_update
+
 
 def is_exception_like(api_exc: client.ApiException, code=None, message_like=None, **kwargs):
     if code and api_exc.status != code:
