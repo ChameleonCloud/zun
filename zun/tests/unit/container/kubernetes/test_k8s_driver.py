@@ -411,3 +411,39 @@ class TestSyncContainerImagePullErrors(TestK8sDriver):
                 self.assertEqual(consts.CREATING, container.status)
                 self.assertEqual(waiting_reason, container.status_detail)
                 self.assertEqual("failed to resolve reference: not found", container.status_reason)
+
+
+class TestWSClientSelectPatch(base.DriverTestCase):
+    """WSClient.update is monkey-patched to avoid select.poll, which
+    eventlet.monkey_patch() removes."""
+
+    def test_update_reads_frame_without_select_poll(self):
+        import io
+        import select
+        import socket
+
+        from kubernetes.stream.ws_client import WSClient
+        from websocket import ABNF
+
+        reader, writer = socket.socketpair()
+        self.addCleanup(reader.close)
+        self.addCleanup(writer.close)
+        writer.send(b"x")  # make the socket readable for select.select
+
+        frame = mock.Mock(data=b"\x01hello")
+        ws = mock.Mock()
+        ws.is_open.return_value = True
+        ws.sock.connected = True
+        ws.sock.sock = reader
+        ws.sock.recv_data_frame.return_value = (ABNF.OPCODE_BINARY, frame)
+        ws._all = io.StringIO()
+        ws._channels = {}
+
+        # create=True because eventlet's monkey patching has already
+        # removed select.poll in the test environment
+        with mock.patch.object(select, "poll", create=True) as mock_poll:
+            WSClient.update(ws, timeout=1)
+
+        mock_poll.assert_not_called()
+        self.assertEqual("hello", ws._all.getvalue())
+        self.assertEqual({1: "hello"}, ws._channels)
