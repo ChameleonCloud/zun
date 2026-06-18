@@ -242,6 +242,40 @@ class ZunProxyRequestHandlerBase(object):
         # in the request. It should just connect and immediately send the request,
         # then send a client disconnect? Or maybe the other end should disconnect :p
 
+    def _proxy_native_websocket(self, container, target_url, 
+                                send_initial_resize=False):
+
+        try:
+            ws_opts = self.compute_api.container_get_websocket_opts(
+                _admin_context(), container)
+        except Exception as e:
+            LOG.exception("failed to get websocket options")
+            # Only zun-compute agents supporting API >=1.2 have this method.
+            ws_opts = {}
+
+        options = {}
+        if "ca" in ws_opts or "cert" in ws_opts or "key" in ws_opts:
+            options["sslopt"] = {
+                "certfile": _write_sock_optfile(ws_opts.get("cert")),
+                "keyfile": _write_sock_optfile(ws_opts.get("key")),
+                "ca_certs": _write_sock_optfile(ws_opts.get("ca")),
+            }
+        wscls = WebSocketClient(host_url=target_url, escape="~",
+                                    close_wait=0.5, **options)
+        wscls.connect()
+        self.target = wscls
+
+        channels=ws_opts.get("channels",[])
+        
+        # Start proxying
+        try:
+            self.do_websocket_proxy(self.target.ws, channels=channels)
+        except Exception:
+            if self.target.ws:
+                self.target.ws.close()
+                self.vmsg(_("Websocket client or target closed"))
+            raise
+
     def _new_websocket_client(self, container, token, uuid):
         if token != container.websocket_token:
             raise exception.InvalidWebsocketToken(token)
@@ -251,39 +285,10 @@ class ZunProxyRequestHandlerBase(object):
 
         self._verify_origin(access_url)
 
-        if container.websocket_url:
-            target_url = container.websocket_url
-            escape = "~"
-            close_wait = 0.5
-            try:
-                ws_opts = self.compute_api.container_get_websocket_opts(
-                    _admin_context(), container)
-            except Exception as e:
-                LOG.exception("failed to get websocket options")
-                # Only zun-compute agents supporting API >=1.2 have this method.
-                ws_opts = {}
-            options = {}
-            if "ca" in ws_opts or "cert" in ws_opts or "key" in ws_opts:
-                options["sslopt"] = {
-                    "certfile": _write_sock_optfile(ws_opts.get("cert")),
-                    "keyfile": _write_sock_optfile(ws_opts.get("key")),
-                    "ca_certs": _write_sock_optfile(ws_opts.get("ca")),
-                }
-            wscls = WebSocketClient(host_url=target_url, escape=escape,
-                                    close_wait=close_wait, **options)
-            wscls.connect()
-            self.target = wscls
-        else:
+        if not container.websocket_url:
             raise exception.InvalidWebsocketUrl()
-
-        # Start proxying
-        try:
-            self.do_websocket_proxy(self.target.ws, channels=ws_opts.get("channels"))
-        except Exception:
-            if self.target.ws:
-                self.target.ws.close()
-                self.vmsg(_("Websocket client or target closed"))
-            raise
+        
+        self._proxy_native_websocket(container, container.websocket_url)
 
     def _new_exec_client(self, container, token, uuid, exec_id):
         exec_instance = None
@@ -298,6 +303,11 @@ class ZunProxyRequestHandlerBase(object):
                                               token, uuid)
 
         self._verify_origin(access_url)
+
+        if exec_instance.url.startswith(("ws://", "wss://")):
+            self._proxy_native_websocket(container, exec_instance.url,
+                                 send_initial_resize=True)
+            return
 
         client = docker.APIClient(base_url=exec_instance.url)
         tsock = client.exec_start(exec_id, socket=True, tty=True)

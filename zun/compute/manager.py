@@ -848,7 +848,7 @@ class Manager(periodic_task.PeriodicTasks):
             else:
                 token = uuidutils.generate_uuid()
                 url = self.driver.get_exec_url(context, container, exec_id,
-                                               command)
+                                               command, interactive)
                 exec_instace = objects.ExecInstance(
                     context, container_id=container.id, exec_id=exec_id,
                     url=url, token=token)
