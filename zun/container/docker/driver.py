@@ -887,6 +887,9 @@ class DockerDriver(driver.BaseDriver, driver.ContainerDriver,
                         "no such exec instance: %s") % str(api_error))
                 raise
 
+    def get_exec_url(self, context, container, exec_id, command):
+        return CONF.docker.docker_remote_api_url
+
     @check_container_id
     @wrap_docker_error
     def kill(self, context, container, signal=None):
