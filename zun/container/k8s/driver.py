@@ -26,6 +26,7 @@ from kubernetes.client.models.v1_container_image import V1ContainerImage
 from oslo_log import log as logging
 from oslo_serialization import jsonutils
 from oslo_utils import units
+from oslo_utils import uuidutils
 from websocket import ABNF
 import urllib3
 
@@ -694,8 +695,15 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
 
         return ws_client
 
-    def execute_create(self, context, container, command, interactive=None, **kwargs):
+    def execute_create(self, context, container, command, run=True, interactive=False):
         """Create an execute instance for running a command."""
+
+        if not run:
+            # Deferred: the command executes when a client connects to the
+            # websocket; return a handle for the ExecInstance.
+            return uuidutils.generate_uuid()
+
+        # run=True: execute synchronously and return the result for execute_run.
         ws_client = self._connect_pod_exec(context, container, command, stdin=False)
         ws_client.run_forever(timeout=CONF.k8s.execute_timeout)
 
