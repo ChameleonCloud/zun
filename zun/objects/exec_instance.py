@@ -59,3 +59,9 @@ class ExecInstance(base.ZunPersistentObject, base.ZunObject):
         values = self.obj_get_changes()
         db_exec_inst = dbapi.create_exec_instance(context, values)
         self._from_db_object(self, db_exec_inst)
+
+    @base.remotable
+    def destroy(self, context=None):
+        deleted = dbapi.destroy_exec_instance(context, self.id)
+        self.obj_reset_changes()
+        return deleted
