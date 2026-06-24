@@ -38,6 +38,8 @@ def payload_for_client(frame):
 
     Forward only stdout/stderr; drop the channel byte, the error/status frame,
     resize, and empty frames so none of them reach the terminal.
+
+    This combines stdout and stderr into one stream.
     """
     if not frame:
         return None
