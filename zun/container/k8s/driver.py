@@ -700,9 +700,13 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
         """Create an execute instance for running a command."""
 
         if not run:
-            # Deferred: the command executes when a client connects to the
-            # websocket; return a handle for the ExecInstance.
-            return uuidutils.generate_uuid()
+            # The command executes when a client connects to the websocket. 
+            # Return a primary key for the exec instance stored in the DB.
+            # it will be looked up and matched on exec_id, container_id, and 
+            # token.
+            # 64 character hex chosen to match docker exec id, since api validates.
+            
+            return os.urandom(32).hex()
 
         # run=True: execute synchronously and return the result for execute_run.
         ws_client = self._connect_pod_exec(context, container, command, stdin=False)
