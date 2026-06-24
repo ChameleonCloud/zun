@@ -23,7 +23,8 @@ LOG = logging.getLogger(__name__)
 @base.ZunObjectRegistry.register
 class ExecInstance(base.ZunPersistentObject, base.ZunObject):
     # Version 1.0: Initial version
-    VERSION = '1.0'
+    # Version 1.1: Add destroy()
+    VERSION = '1.1'
 
     fields = {
         'id': fields.IntegerField(),
