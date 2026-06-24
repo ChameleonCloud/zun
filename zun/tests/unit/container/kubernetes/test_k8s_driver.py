@@ -165,13 +165,11 @@ class TestK8sDriverActions(TestK8sDriver):
         self.assertEqual({"output": "hello", "exit_code": 0}, result)
 
     def test_execute_resize(self):
-        self.assertRaises(
-            NotImplementedError,
-            self.driver.execute_resize,
-            exec_id=None,
-            height=None,
-            width=None,
-        )
+        # k8s tty resize is handled in-band by the websocket proxy; the driver
+        # method is intentionally a no-op.
+        self.assertIsNone(
+            self.driver.execute_resize(
+                exec_id=None, height=None, width=None))
 
     def test_resize(self):
         mock_container = mock.MagicMock()
