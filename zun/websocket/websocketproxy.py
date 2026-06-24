@@ -146,13 +146,33 @@ class ZunProxyRequestHandlerBase(object):
                 raise self.CClose(1000, "Target closed")
             if isinstance(buf, str):
                 buf = buf.encode()
-            self.cqueue.append(buf)
+            buf = self._demux_payload(buf)
+            if buf:
+                self.cqueue.append(buf)
 
     def _prefix_payload(self, channel, payload):
         if self.channels and channel in self.channels:
             return chr(self.channels[channel]).encode('ascii') + payload
         else:
             return payload
+
+    def _demux_payload(self, payload):
+        """Strip the channel byte from a channel-framed (k8s) target frame.
+
+        For channel-framed targets every inbound message is prefixed with a
+        channel id (0 stdin, 1 stdout, 2 stderr, 3 error/status, 4 resize).
+        Forward only stdout/stderr to the client and drop the rest -- notably
+        the channel-3 status JSON, which would otherwise be rendered in the
+        terminal. For unframed targets (docker console) pass it through
+        unchanged.
+        """
+        if not self.channels or not payload:
+            return payload
+        channel = payload[0]
+        forward = (self.channels.get('stdout'), self.channels.get('stderr'))
+        if channel in forward:
+            return payload[1:]
+        return b''
 
     def do_websocket_proxy(self, target, channels=None):
         """Proxy websocket link
