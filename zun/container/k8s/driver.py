@@ -38,12 +38,10 @@ from zun.common.docker_image import reference as docker_image
 from zun.container import driver
 from zun.container.k8s import exception as k8s_exc
 from zun.container.k8s import host, mapping, network, volume
+from zun.websocket.k8s_remotecommand import Channel
 
 CONF = zun.conf.CONF
 LOG = logging.getLogger(__name__)
-
-STDOUT_CHANNEL = 1
-STDERR_CHANNEL = 2
 
 # A fake "network id" for when we want to keep track of container
 # addresses but the driver is not configured to integrate w/ Neutron.
@@ -97,7 +95,7 @@ def _select_update(self, timeout=0):
                 channel = ord(data[0])
                 data = data[1:]
                 if data:
-                    if channel in (STDOUT_CHANNEL, STDERR_CHANNEL):
+                    if channel in (Channel.STDOUT, Channel.STDERR):
                         # keeping all messages in the order they received
                         # for non-blocking call.
                         self._all.write(data)
@@ -191,9 +189,9 @@ class WSFileManager:
                             channel = data[0]
                             data = data[1:]
                             if data:
-                                if channel == STDOUT_CHANNEL:
+                                if channel == Channel.STDOUT:
                                     stdout_bytes = data
-                                elif channel == STDERR_CHANNEL:
+                                elif channel == Channel.STDERR:
                                     stderr_bytes = data
         return stdout_bytes, stderr_bytes, not self.ws_client._connected
 
