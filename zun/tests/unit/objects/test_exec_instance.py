@@ -50,3 +50,15 @@ class TestExecInstanceObject(base.DbTestCase):
             mock_create_exec_instance.assert_called_once_with(
                 self.context, self.fake_exec_inst)
             self.assertEqual(self.context, exec_inst._context)
+
+    def test_destroy(self):
+        with mock.patch.object(self.dbapi, 'destroy_exec_instance',
+                               autospec=True) as mock_destroy_exec_instance:
+            mock_destroy_exec_instance.return_value = 1
+            exec_inst = objects.ExecInstance(
+                self.context, **self.fake_exec_inst)
+            deleted = exec_inst.destroy(self.context)
+            mock_destroy_exec_instance.assert_called_once_with(
+                self.context, self.fake_exec_inst['id'])
+            self.assertEqual(1, deleted)
+            self.assertEqual(self.context, exec_inst._context)
