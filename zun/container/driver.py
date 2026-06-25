@@ -406,6 +406,10 @@ class ContainerDriver(object):
         """Resizes the tty session used by the exec."""
         raise NotImplementedError()
 
+    def get_exec_url(self, context, container, exec_id, command, interactive):
+        """Get the target url the websocket proxy connects to for an exec."""
+        raise NotImplementedError()
+
     def kill(self, context, container, signal):
         """Kill a container with specified signal."""
         raise NotImplementedError()
