@@ -18,6 +18,7 @@ import shlex
 import time
 from collections import defaultdict
 from pathlib import Path
+from urllib.parse import urlencode
 
 from kubernetes import client, config, watch
 from kubernetes.stream import stream
@@ -692,8 +693,18 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
 
         return ws_client
 
-    def execute_create(self, context, container, command, interactive=None, **kwargs):
+    def execute_create(self, context, container, command, run=True, interactive=False):
         """Create an execute instance for running a command."""
+
+        if not run:
+            # The command executes when a client connects to the websocket.
+            # Return a primary key for the exec instance stored in the DB.
+            # it will be looked up and matched on exec_id, container_id, and
+            # token.
+            # 64 character hex chosen to match docker exec id, since api validates.
+            return os.urandom(32).hex()
+
+        # run=True: execute synchronously and return the result for execute_run.
         ws_client = self._connect_pod_exec(context, container, command, stdin=False)
         ws_client.run_forever(timeout=CONF.k8s.execute_timeout)
 
@@ -720,14 +731,63 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
 
     def execute_resize(self, exec_id, height, width):
         """Resizes the tty session used by the exec."""
-        # Write to the websocket open for the exec
-        raise NotImplementedError()
+        # k8s tty resize is sent in-band on the exec websocket, which the
+        # proxy holds (not this process); nothing to do here.
+        # TODO: handle this somehow.
+        LOG.info("Ignoring exec resize for %s; handled by websocket proxy",
+                 exec_id)
 
     def kill(self, context, container, signal):
         """Kill a container with specified signal."""
         LOG.info("Killing container %s with signal %s", container.uuid, signal)
         LOG.warning("Killing a container with signal %s is not supported, stopping instead", signal)
         self.stop(context=context, container=container, timeout=None)
+
+    def _exec_url_for_command(self, context, container, command, interactive):
+        """Implement k8s remotecommand exec.
+        https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.30/#get-connect-exec-pod-v1-core
+        """
+
+        # look up pod from container
+        pod = self._pod_for_container(context, container)
+        if not pod:
+            raise exception.ContainerNotFound()
+
+        name = pod.metadata.name
+        namespace = pod.metadata.namespace
+
+        # k8s wants one command= param per argv element.
+        params = []
+        command_array = shlex.split(command)
+        for cmd in command_array:
+            params.append(("command", cmd))
+
+        # if interactive, allocate tty and plumb stdin
+        # when tty set, stderr and stdout combined
+        if interactive:
+            params.append(("tty", "true"))
+            params.append(("stdin", "true"))
+            params.append(("stdout", "true"))
+            params.append(("stderr", "false"))
+        else:
+            params.append(("tty", "false"))
+            params.append(("stdin", "false"))
+            params.append(("stdout", "true"))
+            params.append(("stderr", "true"))
+
+        query = urlencode(params)
+
+        # websocket url for api host
+        host = self.core_v1().api_client.configuration.host.replace(
+            "https:", "wss:")
+
+        return f"{host}/api/v1/namespaces/{namespace}/pods/{name}/exec?{query}"
+
+    def get_exec_url(self, context, container, exec_id, command, interactive):
+        # exec_id is the opaque handle from execute_create; for k8s the command
+        # is encoded in the url itself, it isn't needed here.
+        return self._exec_url_for_command(
+            context, container, command, interactive)
 
     def get_websocket_url(self, context, container):
         """Get websocket url of a container."""
