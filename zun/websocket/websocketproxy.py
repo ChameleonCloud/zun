@@ -326,6 +326,16 @@ class ZunProxyRequestHandlerBase(object):
 
         self._verify_origin(access_url)
 
+        # Prevent replay attacks by deleting the exec instance row. This is
+        # important because the k8s backend invokes the command when the
+        # websocket connects, and unlike the docker backend, doesn't internally
+        # prevent the same command from being invoked multiple times.
+        # A DB row-lock prevents multiple processes/threads from claiming the
+        # same exec instance.
+        # TODO(chameleon): Periodically prune unclaimed execinstance rows.
+        if not exec_instance.destroy(_admin_context()):
+            raise exception.InvalidWebsocketToken(token)
+
         client = docker.APIClient(base_url=exec_instance.url)
         tsock = client.exec_start(exec_id, socket=True, tty=True)
         if hasattr(tsock, "_sock"):

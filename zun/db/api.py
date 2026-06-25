@@ -1080,6 +1080,18 @@ def list_exec_instances(context, filters=None, limit=None, marker=None,
         context, filters, limit, marker, sort_key, sort_dir)
 
 
+@profiler.trace("db")
+def destroy_exec_instance(context, exec_instance_id):
+    """Destroy an exec instance.
+
+    :param context: The security context
+    :param exec_instance_id: The id of the exec instance to destroy.
+    :returns: the number of rows deleted (1 if deleted, 0 if already gone).
+    """
+    return _get_dbdriver_instance().destroy_exec_instance(
+        context, exec_instance_id)
+
+
 @profiler.trace('db')
 def count_usage(context, container_type, project_id, flag):
     return _get_dbdriver_instance().count_usage(context, container_type,
