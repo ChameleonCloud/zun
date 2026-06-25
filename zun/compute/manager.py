@@ -847,7 +847,8 @@ class Manager(periodic_task.PeriodicTasks):
                         "token": None}
             else:
                 token = uuidutils.generate_uuid()
-                url = CONF.docker.docker_remote_api_url
+                url = self.driver.get_exec_url(context, container, exec_id,
+                                               command, interactive)
                 exec_instace = objects.ExecInstance(
                     context, container_id=container.id, exec_id=exec_id,
                     url=url, token=token)
