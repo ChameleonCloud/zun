@@ -139,14 +139,41 @@ class ZunProxyRequestHandlerBase(object):
             # Receive target data, encode it and queue for client
             buf = target.recv()
             if len(buf) == 0:
-                self.msg(_("Client closed connection:"
-                           "%(host)s:%(port)s") % {
+                # Target hit EOF: flush queued output before closing so the
+                # tail of the stream is not dropped.
+                self._drain_cqueue_to_client()
+                self.msg(_("Target closed connection: %(host)s:%(port)s") % {
                     'host': self.server.target_host,
                     'port': self.server.target_port})
                 raise self.CClose(1000, "Target closed")
             if isinstance(buf, str):
                 buf = buf.encode()
             self.cqueue.append(buf)
+
+    def _drain_cqueue_to_client(self, timeout=2.0):
+        """Flush any queued client-bound output before closing.
+
+        On target EOF we must push whatever is still in self.cqueue to the
+        client; otherwise the tail of the stream is lost (the normal send
+        branch only runs when select reports the client writable, which may
+        not happen in the pass that delivers EOF). Honor backpressure: if
+        send_frames reports the client can't absorb it all, wait for the
+        socket to become writable and retry, bounded by ``timeout`` so a dead
+        client can't hang the worker.
+        """
+        deadline = time.time() + timeout
+        while self.cqueue or self.c_pend:
+            # send_frames flushes cqueue + any internally-pending parts.
+            self.c_pend = self.send_frames(self.cqueue)
+            self.cqueue = []
+            if not self.c_pend:
+                break
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            _, writable, _ = select.select([], [self.request], [], remaining)
+            if not writable:
+                break  # client gone / stalled; give up rather than hang
 
     def _prefix_payload(self, channel, payload):
         if self.channels and channel in self.channels:
