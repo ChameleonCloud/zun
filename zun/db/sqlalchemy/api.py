@@ -1288,6 +1288,14 @@ class Connection(object):
                 exec_id=values['exec_id'])
         return exec_inst
 
+    def destroy_exec_instance(self, context, exec_instance_id):
+        # Returns number of rows deleted, 1 if this call did it,
+        # 0 if already deleted.
+        session = get_session()
+        with session.begin():
+            return model_query(models.ExecInstance, session=session) \
+                .filter_by(id=exec_instance_id).delete()
+
     def count_usage(self, context, container_type, project_id, flag):
         session = get_session()
         if flag == 'containers':

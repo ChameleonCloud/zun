@@ -1,0 +1,7 @@
+---
+upgrade:
+  - |
+    The ``exec_instance.url`` column has been widened from ``VARCHAR(255)`` to
+    ``TEXT`` to accommodate longer exec target URLs (some backends encode the
+    exec command into the URL). Run ``zun-db-manage upgrade`` to apply the
+    schema migration.

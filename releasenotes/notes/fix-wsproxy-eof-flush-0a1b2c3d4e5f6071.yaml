@@ -1,0 +1,8 @@
+---
+fixes:
+  - |
+    Fixed a bug in the websocket proxy where the tail of an interactive
+    session's output could be dropped when the target connection closed.
+    Output still queued for the client is now flushed (honoring backpressure,
+    bounded by a timeout so a dead client cannot hang the worker) before the
+    proxy closes the connection.

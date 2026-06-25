@@ -87,3 +87,14 @@ class DbExecInstanceTestCase(base.DbTestCase):
         res = dbapi.list_exec_instances(
             self.context, filters={'container_id': 777})
         self.assertEqual([], [r.id for r in res])
+
+    def test_destroy_exec_instance(self):
+        exec_inst = utils.create_test_exec_instance(context=self.context)
+        deleted = dbapi.destroy_exec_instance(self.context, exec_inst.id)
+        self.assertEqual(1, deleted)
+        res = dbapi.list_exec_instances(self.context)
+        self.assertEqual([], [r.id for r in res])
+
+        # doing it a second time should return 0 rows
+        second_deletion = dbapi.destroy_exec_instance(self.context, exec_inst.id)
+        self.assertEqual(0, second_deletion)
