@@ -837,7 +837,7 @@ class Manager(periodic_task.PeriodicTasks):
         try:
             # NOTE(hongbin): capsule shouldn't reach here
             exec_id = self.driver.execute_create(context, container, command,
-                                                 interactive)
+                                                 run=run, interactive=interactive)
             if run:
                 # NOTE(hongbin): capsule shouldn't reach here
                 output, exit_code = self.driver.execute_run(exec_id, command)
