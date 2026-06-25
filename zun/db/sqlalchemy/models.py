@@ -247,7 +247,7 @@ class ExecInstance(Base):
                           nullable=False)
     exec_id = Column(String(255), nullable=False)
     token = Column(String(255), nullable=True)
-    url = Column(String(255), nullable=True)
+    url = Column(Text(), nullable=True)
     container = orm.relationship(
         Container,
         backref=orm.backref('exec_instances'),
