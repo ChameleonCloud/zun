@@ -141,14 +141,35 @@ class TestK8sDriverActions(TestK8sDriver):
             mock_container,
         )
 
+    def test_execute_create_deferred_returns_handle(self):
+        # run=False must not execute now; it returns an opaque handle for the
+        # ExecInstance, and the command runs when a client attaches.
+        with mock.patch.object(self.driver, "_connect_pod_exec") as mock_conn:
+            handle = self.driver.execute_create(
+                self.context, mock.MagicMock(), "ls", run=False)
+        self.assertIsInstance(handle, str)
+        mock_conn.assert_not_called()
+
+    def test_execute_create_run_executes_synchronously(self):
+        # run=True connects, runs to completion, and returns the result that
+        # execute_run hands back.
+        ws_client = mock.MagicMock()
+        ws_client.returncode = 0
+        ws_client.read_all.return_value = "hello"
+        with mock.patch.object(self.driver, "_connect_pod_exec",
+                               return_value=ws_client) as mock_conn:
+            result = self.driver.execute_create(
+                self.context, mock.MagicMock(), "ls", run=True)
+        mock_conn.assert_called_once()
+        ws_client.run_forever.assert_called_once()
+        self.assertEqual({"output": "hello", "exit_code": 0}, result)
+
     def test_execute_resize(self):
-        self.assertRaises(
-            NotImplementedError,
-            self.driver.execute_resize,
-            exec_id=None,
-            height=None,
-            width=None,
-        )
+        # k8s tty resize is handled in-band by the websocket proxy; the driver
+        # method is intentionally a no-op.
+        self.assertIsNone(
+            self.driver.execute_resize(
+                exec_id=None, height=None, width=None))
 
     def test_resize(self):
         mock_container = mock.MagicMock()
