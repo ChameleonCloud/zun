@@ -855,7 +855,7 @@ class DockerDriver(driver.BaseDriver, driver.ContainerDriver,
 
     @check_container_id
     @wrap_docker_error
-    def execute_create(self, context, container, command, interactive=False):
+    def execute_create(self, context, container, command, run=True, interactive=False):
         stdin = True if interactive else False
         tty = True if interactive else False
         with docker_utils.docker_client() as docker:

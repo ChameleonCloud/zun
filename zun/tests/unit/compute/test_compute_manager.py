@@ -1079,7 +1079,7 @@ class TestManager(base.TestCase):
         self.assertIsNone(result.get('exec_id'))
         self.assertIsNone(result.get('token'))
         mock_execute_create.assert_called_once_with(
-            self.context, container, 'fake_cmd', False)
+            self.context, container, 'fake_cmd', run=True, interactive=False)
         mock_execute_run.assert_called_once_with('fake_exec_id', 'fake_cmd')
 
     @mock.patch.object(ExecInstance, 'create')
@@ -1096,7 +1096,7 @@ class TestManager(base.TestCase):
         self.assertEqual('fake_exec_id', result.get('exec_id'))
         self.assertIsNotNone(result.get('token'))
         mock_execute_create.assert_called_once_with(
-            self.context, container, 'fake_cmd', True)
+            self.context, container, 'fake_cmd', run=False, interactive=True)
         mock_execute_run.assert_not_called()
 
     @mock.patch.object(fake_driver, 'execute_create')
