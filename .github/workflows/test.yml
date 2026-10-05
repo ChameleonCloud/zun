@@ -2,6 +2,8 @@ name: Unit tests
 
 on:
   push:
+    branches:
+      - 'chameleoncloud/*'
   pull_request:
 
 jobs:
@@ -23,4 +25,4 @@ jobs:
       - name: Install deps
         run: "pip install tox"
       - name: Run tests for ${{ matrix.python-version }}
-        run: tox -e "py${{ matrix.python-version }}"
+        run: tox -e py
