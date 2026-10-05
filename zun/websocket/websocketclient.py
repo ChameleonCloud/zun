@@ -35,19 +35,23 @@ class WebSocketClient(object):
 
     def connect(self):
         url = self.host_url
-        sslopt = None
-        if url.startswith('wss'):
+
+        # Copy so the docker sslopt added below stays out of self.options.
+        options = dict(self.options)
+
+        if url.startswith('wss') and 'sslopt' not in options:
+            # TODO: this is compatibility for the docker backend, 
+            # which should pass sslopt itself instead.
             ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
             ssl_context.load_verify_locations(CONF.docker.ca_file)
             ssl_context.load_cert_chain(CONF.docker.cert_file,
                                         CONF.docker.key_file)
-            sslopt = {'context': ssl_context}
+            options['sslopt'] = {'context': ssl_context}
 
         try:
             self.ws = websocket.create_connection(url,
-                                                  sslopt=sslopt,
                                                   skip_utf8_validation=True,
-                                                  **self.options)
+                                                  **options)
         except socket.error as e:
             raise exception.ConnectionFailed(e)
         except websocket.WebSocketConnectionClosedException as e:
