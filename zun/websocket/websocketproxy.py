@@ -38,6 +38,7 @@ from zun.common.i18n import _
 from zun.compute import api as compute_api
 import zun.conf
 from zun import objects
+from zun.websocket import k8s_remotecommand
 from zun.websocket.websocketclient import WebSocketClient
 
 LOG = logging.getLogger(__name__)
@@ -51,8 +52,9 @@ def _admin_context():
 def _write_sock_optfile(contents):
     """Write some config file to storage.
 
-    This is useful for libraries that require some configuration be read from a file,
-    yet we receive all websocket options via RPC transport as raw text.
+    This is useful for libraries that require some configuration be read
+    from a file, yet we receive all websocket options via RPC transport as
+    raw text.
     """
     if not contents:
         return None
@@ -61,6 +63,7 @@ def _write_sock_optfile(contents):
     if not path.exists():
         path.write_text(contents)
     return path.absolute()
+
 
 class ZunProxyRequestHandlerBase(object):
     compute_api: "compute_api.API" = None
@@ -129,7 +132,7 @@ class ZunProxyRequestHandlerBase(object):
 
         if target in outs:
             while self.tqueue:
-                payload = self._prefix_payload('stdin', self.tqueue.pop(0))
+                payload = self._prefix_payload(self.tqueue.pop(0))
                 remaining = self._send_buffer(payload, target)
                 if remaining is not None:
                     self.tqueue.appendleft(remaining)
@@ -139,22 +142,60 @@ class ZunProxyRequestHandlerBase(object):
             # Receive target data, encode it and queue for client
             buf = target.recv()
             if len(buf) == 0:
-                self.msg(_("Client closed connection:"
-                           "%(host)s:%(port)s") % {
+                # Target hit EOF: flush queued output before closing so the
+                # tail of the stream is not dropped.
+                self._drain_cqueue_to_client()
+                self.msg(_("Target closed connection: %(host)s:%(port)s") % {
                     'host': self.server.target_host,
                     'port': self.server.target_port})
                 raise self.CClose(1000, "Target closed")
             if isinstance(buf, str):
                 buf = buf.encode()
-            self.cqueue.append(buf)
+            buf = self._demux_payload(buf)
+            if buf:
+                self.cqueue.append(buf)
 
-    def _prefix_payload(self, channel, payload):
-        if self.channels and channel in self.channels:
-            return chr(self.channels[channel]).encode('ascii') + payload
-        else:
-            return payload
+    def _drain_cqueue_to_client(self, timeout=2.0):
+        """Flush any queued client-bound output before closing.
 
-    def do_websocket_proxy(self, target, channels=None):
+        On target EOF we must push whatever is still in self.cqueue to the
+        client; otherwise the tail of the stream is lost (the normal send
+        branch only runs when select reports the client writable, which may
+        not happen in the pass that delivers EOF). Honor backpressure: if
+        send_frames reports the client can't absorb it all, wait for the
+        socket to become writable and retry, bounded by ``timeout`` so a dead
+        client can't hang the worker.
+        """
+        deadline = time.time() + timeout
+        while self.cqueue or self.c_pend:
+            # send_frames flushes cqueue + any internally-pending parts.
+            self.c_pend = self.send_frames(self.cqueue)
+            self.cqueue = []
+            if not self.c_pend:
+                break
+            remaining = deadline - time.time()
+            if remaining <= 0:
+                break
+            _, writable, _ = select.select([], [self.request], [], remaining)
+            if not writable:
+                break  # client gone / stalled; give up rather than hang
+
+    def _prefix_payload(self, payload):
+        """Frame stdin coming from client and going to a backend."""
+        if self.framed:
+            return k8s_remotecommand.frame_from_client(payload)
+        return payload
+
+    def _demux_payload(self, payload):
+        """Demux a frame from a backend and split into stdout,stderr channels.
+
+        For unframed backends (docker) the payload passes through unchanged.
+        """
+        if self.framed:
+            return k8s_remotecommand.payload_for_client(payload)
+        return payload
+
+    def do_websocket_proxy(self, target, framed=False):
         """Proxy websocket link
 
         Proxy client WebSocket to normal target socket.
@@ -162,7 +203,7 @@ class ZunProxyRequestHandlerBase(object):
         self.cqueue = []
         self.tqueue = []
         self.c_pend = 0
-        self.channels = channels
+        self.framed = framed
         rlist = [self.request, target]
 
         if self.server.heartbeat:
@@ -237,10 +278,43 @@ class ZunProxyRequestHandlerBase(object):
         else:
             self._new_websocket_client(container, token, uuid)
 
-        # TODO: here is where we could perhaps trigger a quick websocket resize
-        # to an already open client, if exec_id is not specified AND resize is given
-        # in the request. It should just connect and immediately send the request,
-        # then send a client disconnect? Or maybe the other end should disconnect :p
+        # TODO(chameleon): here is where we could perhaps trigger a quick
+        # websocket resize to an already open client, if exec_id is not
+        # specified AND resize is given in the request. It should just connect
+        # and immediately send the request, then send a client disconnect? Or
+        # maybe the other end should disconnect :p
+
+    def _proxy_native_websocket(self, container, target_url):
+        try:
+            ws_opts = self.compute_api.container_get_websocket_opts(
+                _admin_context(), container)
+        except Exception:
+            LOG.exception("failed to get websocket options")
+            # Only zun-compute agents supporting API >=1.2 have this method.
+            ws_opts = {}
+
+        options = {}
+        if "ca" in ws_opts or "cert" in ws_opts or "key" in ws_opts:
+            options["sslopt"] = {
+                "certfile": _write_sock_optfile(ws_opts.get("cert")),
+                "keyfile": _write_sock_optfile(ws_opts.get("key")),
+                "ca_certs": _write_sock_optfile(ws_opts.get("ca")),
+            }
+        wscls = WebSocketClient(host_url=target_url, escape="~",
+                                close_wait=0.5, **options)
+        wscls.connect()
+        self.target = wscls
+
+        framed = bool(ws_opts.get("channels"))
+
+        # Start proxying
+        try:
+            self.do_websocket_proxy(self.target.ws, framed=framed)
+        except Exception:
+            if self.target.ws:
+                self.target.ws.close()
+                self.vmsg(_("Websocket client or target closed"))
+            raise
 
     def _new_websocket_client(self, container, token, uuid):
         if token != container.websocket_token:
@@ -251,39 +325,10 @@ class ZunProxyRequestHandlerBase(object):
 
         self._verify_origin(access_url)
 
-        if container.websocket_url:
-            target_url = container.websocket_url
-            escape = "~"
-            close_wait = 0.5
-            try:
-                ws_opts = self.compute_api.container_get_websocket_opts(
-                    _admin_context(), container)
-            except Exception as e:
-                LOG.exception("failed to get websocket options")
-                # Only zun-compute agents supporting API >=1.2 have this method.
-                ws_opts = {}
-            options = {}
-            if "ca" in ws_opts or "cert" in ws_opts or "key" in ws_opts:
-                options["sslopt"] = {
-                    "certfile": _write_sock_optfile(ws_opts.get("cert")),
-                    "keyfile": _write_sock_optfile(ws_opts.get("key")),
-                    "ca_certs": _write_sock_optfile(ws_opts.get("ca")),
-                }
-            wscls = WebSocketClient(host_url=target_url, escape=escape,
-                                    close_wait=close_wait, **options)
-            wscls.connect()
-            self.target = wscls
-        else:
+        if not container.websocket_url:
             raise exception.InvalidWebsocketUrl()
 
-        # Start proxying
-        try:
-            self.do_websocket_proxy(self.target.ws, channels=ws_opts.get("channels"))
-        except Exception:
-            if self.target.ws:
-                self.target.ws.close()
-                self.vmsg(_("Websocket client or target closed"))
-            raise
+        self._proxy_native_websocket(container, container.websocket_url)
 
     def _new_exec_client(self, container, token, uuid, exec_id):
         exec_instance = None
@@ -298,6 +343,21 @@ class ZunProxyRequestHandlerBase(object):
                                               token, uuid)
 
         self._verify_origin(access_url)
+
+        # Prevent replay attacks by deleting the exec instance row. This is
+        # important because the k8s backend invokes the command when the
+        # websocket connects, and unlike the docker backend, doesn't internally
+        # prevent the same command from being invoked multiple times.
+        # A DB row-lock prevents multiple processes/threads from claiming the
+        # same exec instance.
+        # TODO(chameleon): Periodically prune unclaimed execinstance rows.
+        if not exec_instance.destroy(_admin_context()):
+            raise exception.InvalidWebsocketToken(token)
+
+        # Url returned for k8s backend already starts with websocket
+        if exec_instance.url.startswith(("ws://", "wss://")):
+            self._proxy_native_websocket(container, exec_instance.url)
+            return
 
         client = docker.APIClient(base_url=exec_instance.url)
         tsock = client.exec_start(exec_id, socket=True, tty=True)

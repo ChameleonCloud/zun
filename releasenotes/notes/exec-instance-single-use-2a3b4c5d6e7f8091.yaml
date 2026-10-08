@@ -1,0 +1,8 @@
+---
+security:
+  - |
+    Interactive exec tokens are now single-use. When a client connects to the
+    websocket proxy for an exec, the ``ExecInstance`` row is deleted under a
+    row lock before the command is started, so the same token cannot be
+    replayed to invoke the command more than once, and concurrent workers
+    cannot both claim the same exec.
