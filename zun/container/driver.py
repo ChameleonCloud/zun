@@ -394,8 +394,13 @@ class ContainerDriver(object):
         """Show logs of a container."""
         raise NotImplementedError()
 
-    def execute_create(self, context, container, command, **kwargs):
-        """Create an execute instance for running a command."""
+    def execute_create(self, context, container, command, run=True, interactive=False):
+        """Create an execute instance for running a command.
+
+        When run is True, execute now and return a result that execute_run can
+        return directly. When run is False, return an opaque handle to store on
+        the ExecInstance and trigger later via the websocket proxy (get_exec_url).
+        """
         raise NotImplementedError()
 
     def execute_run(self, exec_id, command):
@@ -404,6 +409,10 @@ class ContainerDriver(object):
 
     def execute_resize(self, exec_id, height, width):
         """Resizes the tty session used by the exec."""
+        raise NotImplementedError()
+
+    def get_exec_url(self, context, container, exec_id, command, interactive):
+        """Get the target url the websocket proxy connects to for an exec."""
         raise NotImplementedError()
 
     def kill(self, context, container, signal):

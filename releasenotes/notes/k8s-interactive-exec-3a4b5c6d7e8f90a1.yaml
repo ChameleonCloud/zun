@@ -1,0 +1,11 @@
+---
+features:
+  - |
+    Added interactive shell ``exec`` support for the Kubernetes container
+    driver. A client can now attach an interactive terminal to a command in a
+    Kubernetes-backed container through the websocket proxy, which relays the
+    Kubernetes remotecommand protocol.
+issues:
+  - |
+    Terminal resize is not yet supported for interactive ``exec`` on the
+    Kubernetes driver; the session uses the terminal size at attach time.

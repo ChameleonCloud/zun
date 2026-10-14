@@ -837,7 +837,7 @@ class Manager(periodic_task.PeriodicTasks):
         try:
             # NOTE(hongbin): capsule shouldn't reach here
             exec_id = self.driver.execute_create(context, container, command,
-                                                 interactive)
+                                                 run=run, interactive=interactive)
             if run:
                 # NOTE(hongbin): capsule shouldn't reach here
                 output, exit_code = self.driver.execute_run(exec_id, command)
@@ -847,7 +847,8 @@ class Manager(periodic_task.PeriodicTasks):
                         "token": None}
             else:
                 token = uuidutils.generate_uuid()
-                url = CONF.docker.docker_remote_api_url
+                url = self.driver.get_exec_url(context, container, exec_id,
+                                               command, interactive)
                 exec_instace = objects.ExecInstance(
                     context, container_id=container.id, exec_id=exec_id,
                     url=url, token=token)
