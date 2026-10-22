@@ -1,0 +1,15 @@
+---
+fixes:
+  - |
+    On the Kubernetes driver, ``get_archive`` and ``put_archive`` now pass
+    the path to ``tar`` unchanged. Before, a path with spaces was split,
+    quotes in it were dropped, and a file name starting with ``-`` was read
+    as a ``tar`` option, so the request failed or used the wrong path. The
+    directory check in ``get_archive`` also no longer runs the path through
+    ``sh``.
+  - |
+    On the Kubernetes driver, ``get_archive`` of a single file by its full
+    path, such as ``/etc/hostname``, now returns that file. Before, ``tar``
+    looked for the file in the container's working directory, so the request
+    returned an empty archive, or a file of the same name from that
+    directory.

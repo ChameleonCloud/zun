@@ -1,3 +1,4 @@
+import shlex
 from unittest import mock
 
 from zun.container.k8s.driver import K8sDriver, zun_context
@@ -468,3 +469,67 @@ class TestWSClientSelectPatch(base.DriverTestCase):
         mock_poll.assert_not_called()
         self.assertEqual("hello", ws._all.getvalue())
         self.assertEqual({1: "hello"}, ws._channels)
+
+
+class TestK8sDriverArchiveArgv(TestK8sDriver):
+    """Paths reach the container as single arguments, never through a shell."""
+
+    PATH = "/root/it's \"my\" dir;touch x/$(id) -n.txt"
+
+    def _ws_client(self, stdout=""):
+        """A finished exec: exit 0, stdout already read, stream closed."""
+        return mock.MagicMock(returncode=0, _connected=False,
+                              **{"read_all.return_value": stdout,
+                                 "is_open.return_value": False})
+
+    def _run(self, operation, *args, ws_clients):
+        with mock.patch.object(self.driver, "_connect_pod_exec",
+                               side_effect=ws_clients) as connect:
+            operation(self.context, mock.MagicMock(), *args)
+        # The argv of each command run in the container.
+        self.commands = [shlex.split(call.args[2])
+                         for call in connect.call_args_list]
+
+    def _get_archive(self, path, is_dir):
+        probe = self._ws_client("directory\n" if is_dir else "file\n")
+        self._run(self.driver.get_archive, path,
+                  ws_clients=[probe, self._ws_client()])
+
+    def test_directory_probe_takes_path_as_argument(self):
+        self._get_archive(self.PATH, False)
+        probe = self.commands[0]
+        self.assertEqual(["sh", "-c"], probe[:2])
+        self.assertNotIn("$(id)", probe[2])
+        self.assertEqual(["sh", self.PATH], probe[3:])
+
+    def test_get_archive_file(self):
+        self._get_archive("-x.txt", False)
+        # "./" keeps tar from reading "-x.txt" as an option.
+        self.assertEqual(["tar", "cf", "-", "-C", ".", "./-x.txt"],
+                         self.commands[1])
+
+    def test_get_archive_directory(self):
+        self._get_archive(self.PATH, True)
+        self.assertEqual(["tar", "cf", "-", "-C", self.PATH, "."],
+                         self.commands[1])
+
+    def test_put_archive(self):
+        self._run(self.driver.put_archive, self.PATH, b"data",
+                  ws_clients=[self._ws_client()])
+        self.assertEqual(["tar", "xmf", "-", "-C", self.PATH],
+                         self.commands[0])
+
+    def test_file_by_full_path(self):
+        self._get_archive("/etc/hostname", False)
+        self.assertEqual(["tar", "cf", "-", "-C", "/etc", "./hostname"],
+                         self.commands[1])
+
+    def test_file_by_relative_path(self):
+        self._get_archive("logs/app.log", False)
+        self.assertEqual(["tar", "cf", "-", "-C", "logs", "./app.log"],
+                         self.commands[1])
+
+    def test_file_at_root(self):
+        self._get_archive("/init", False)
+        self.assertEqual(["tar", "cf", "-", "-C", "/", "./init"],
+                         self.commands[1])
