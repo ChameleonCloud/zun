@@ -1,6 +1,7 @@
 import shlex
 from unittest import mock
 
+from zun.container.k8s import exception as k8s_exc
 from zun.container.k8s.driver import K8sDriver, zun_context
 from zun.container.k8s.driver import config as k8s_config
 from zun.container.k8s.network import K8sNetwork as zun_k8s_network
@@ -38,6 +39,21 @@ class TestK8sDriver(base.DriverTestCase):
         self.mock_create_namespaced_network_policy = mock.patch.object(
             self.driver.net_v1, "create_namespaced_network_policy"
         ).start()
+
+    def _ws_client(self, stdout="", fail=False):
+        """A finished exec: exit 0, stdout already read, stream closed.
+
+        With fail, running or reading it raises, as when the connection
+        drops.
+        """
+        ws_client = mock.MagicMock(returncode=0, _connected=False,
+                                   **{"read_all.return_value": stdout,
+                                      "is_open.return_value": False})
+        if fail:
+            ws_client.run_forever.side_effect = OSError("connection reset")
+            ws_client.is_open.side_effect = OSError("connection reset")
+        return ws_client
+
 
 class TestK8sDriverActions(TestK8sDriver):
     def test_create(self):
@@ -476,12 +492,6 @@ class TestK8sDriverArchiveArgv(TestK8sDriver):
 
     PATH = "/root/it's \"my\" dir;touch x/$(id) -n.txt"
 
-    def _ws_client(self, stdout=""):
-        """A finished exec: exit 0, stdout already read, stream closed."""
-        return mock.MagicMock(returncode=0, _connected=False,
-                              **{"read_all.return_value": stdout,
-                                 "is_open.return_value": False})
-
     def _run(self, operation, *args, ws_clients):
         with mock.patch.object(self.driver, "_connect_pod_exec",
                                side_effect=ws_clients) as connect:
@@ -533,3 +543,57 @@ class TestK8sDriverArchiveArgv(TestK8sDriver):
         self._get_archive("/init", False)
         self.assertEqual(["tar", "cf", "-", "-C", "/", "./init"],
                          self.commands[1])
+
+
+class TestK8sDriverClosesExecWebsockets(TestK8sDriver):
+    """Every exec websocket is closed, whether or not the operation fails."""
+
+    def _call(self, operation, *args, ws_clients):
+        with mock.patch.object(self.driver, "_connect_pod_exec",
+                               side_effect=ws_clients):
+            return operation(self.context, mock.MagicMock(), *args)
+
+    def assertClosed(self, *ws_clients):
+        for ws_client in ws_clients:
+            ws_client.close.assert_called_once_with()
+
+    def test_execute(self):
+        ws_client = self._ws_client()
+        self._call(self.driver.execute_create, "true", ws_clients=[ws_client])
+        self.assertClosed(ws_client)
+
+    def test_execute_fails(self):
+        ws_client = self._ws_client(fail=True)
+        self.assertRaises(OSError, self._call, self.driver.execute_create,
+                          "true", ws_clients=[ws_client])
+        self.assertClosed(ws_client)
+
+    def test_get_archive(self):
+        probe, tar = self._ws_client("file\n"), self._ws_client()
+        self._call(self.driver.get_archive, "/f", ws_clients=[probe, tar])
+        self.assertClosed(probe, tar)
+
+    def test_get_archive_probe_fails(self):
+        probe = self._ws_client(fail=True)
+        self.assertRaises(OSError, self._call, self.driver.get_archive, "/f",
+                          ws_clients=[probe])
+        self.assertClosed(probe)
+
+    def test_get_archive_tar_fails(self):
+        probe, tar = self._ws_client("file\n"), self._ws_client(fail=True)
+        self.assertRaises(k8s_exc.K8sException, self._call,
+                          self.driver.get_archive, "/f",
+                          ws_clients=[probe, tar])
+        self.assertClosed(probe, tar)
+
+    def test_put_archive(self):
+        ws_client = self._ws_client()
+        self._call(self.driver.put_archive, "/d", b"data",
+                   ws_clients=[ws_client])
+        self.assertClosed(ws_client)
+
+    def test_put_archive_fails(self):
+        ws_client = self._ws_client(fail=True)
+        self.assertRaises(OSError, self._call, self.driver.put_archive, "/d",
+                          b"data", ws_clients=[ws_client])
+        self.assertClosed(ws_client)

@@ -17,6 +17,7 @@ import select
 import shlex
 import time
 from collections import defaultdict
+from contextlib import closing
 from pathlib import Path
 from urllib.parse import urlencode
 
@@ -706,20 +707,21 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
 
         # run=True: execute synchronously and return the result for execute_run.
         ws_client = self._connect_pod_exec(context, container, command, stdin=False)
-        ws_client.run_forever(timeout=CONF.k8s.execute_timeout)
+        with closing(ws_client):
+            ws_client.run_forever(timeout=CONF.k8s.execute_timeout)
 
-        try:
-            # NOTE(jason): it's important to call this before `read_all`, which clears all
-            # channels, including the "error" channel which carries the exit status info.
-            # This is likely a bug in the python k8s client.
-            exit_code = ws_client.returncode
-            output = ws_client.read_all()
-        except ValueError:
-            # This can happen if the returncode on k8s response is not castable
-            # to an integer. Namely, this will happen if the command could not be found
-            # at all, causing an error at execution create time, rather than runtime.
-            output = "Malformed command, or binary not found in container"
-            exit_code = -1
+            try:
+                # NOTE(jason): it's important to call this before `read_all`, which clears all
+                # channels, including the "error" channel which carries the exit status info.
+                # This is likely a bug in the python k8s client.
+                exit_code = ws_client.returncode
+                output = ws_client.read_all()
+            except ValueError:
+                # This can happen if the returncode on k8s response is not castable
+                # to an integer. Namely, this will happen if the command could not be found
+                # at all, causing an error at execution create time, rather than runtime.
+                output = "Malformed command, or binary not found in container"
+                exit_code = -1
 
         return {"output": output, "exit_code": exit_code}
 
@@ -848,10 +850,11 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
             ])
             ws_client = self._connect_pod_exec(
                 context, container, command, stdin=False)
-            ws_client.run_forever(timeout=CONF.k8s.execute_timeout)
+            with closing(ws_client):
+                ws_client.run_forever(timeout=CONF.k8s.execute_timeout)
 
-            exit_code = ws_client.returncode
-            result = ws_client.read_all()
+                exit_code = ws_client.returncode
+                result = ws_client.read_all()
             return result.strip() == "directory"
 
         is_directory = _is_directory(context, container, path)
@@ -873,20 +876,20 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
             context, container, shlex.join(tar_argv), stdin=False)
 
         tar_bytes = io.BytesIO()
-        try:
-            reader = WSFileManager(ws_client)
-            while True:
-                out, err, closed = reader.read_bytes(int(CONF.k8s.archive_timeout))
-                if out:
-                    tar_bytes.write(out)
-                elif err:
-                    LOG.debug("Error copying file {0} during get_archive".format(err.decode("utf-8", "replace")))
-                if closed:
-                    break
-            ws_client.close()
-            tar_bytes.flush()
-        except Exception as e:
-            raise k8s_exc.K8sException("Failed to read bytes from the tar archive during get_archive")
+        with closing(ws_client):
+            try:
+                reader = WSFileManager(ws_client)
+                while True:
+                    out, err, closed = reader.read_bytes(int(CONF.k8s.archive_timeout))
+                    if out:
+                        tar_bytes.write(out)
+                    elif err:
+                        LOG.debug("Error copying file {0} during get_archive".format(err.decode("utf-8", "replace")))
+                    if closed:
+                        break
+                tar_bytes.flush()
+            except Exception as e:
+                raise k8s_exc.K8sException("Failed to read bytes from the tar archive during get_archive")
 
         tar_size = tar_bytes.tell()
         tar_bytes.seek(0)
@@ -901,12 +904,13 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
             context, container, shlex.join(["tar", "xmf", "-", "-C", path]),
             stdin=True)
 
-        ws_client.write_stdin(data)
-        ws_client.run_forever(timeout=CONF.k8s.archive_timeout)
-        try:
-            exit_code = ws_client.returncode
-        except ValueError:
-            exit_code = -1
+        with closing(ws_client):
+            ws_client.write_stdin(data)
+            ws_client.run_forever(timeout=CONF.k8s.archive_timeout)
+            try:
+                exit_code = ws_client.returncode
+            except ValueError:
+                exit_code = -1
 
         if exit_code < 0:
             raise k8s_exc.K8sException("Failed tar invocation during put_archive")
