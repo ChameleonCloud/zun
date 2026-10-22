@@ -1,0 +1,7 @@
+---
+fixes:
+  - |
+    On the Kubernetes driver, ``get_archive`` now fails if it can't tell
+    within ``[k8s] execute_timeout`` whether the path is a file or a
+    directory. Before, it treated the path as a file, so the archive of a
+    directory ``d`` held ``d/f`` instead of ``f``.

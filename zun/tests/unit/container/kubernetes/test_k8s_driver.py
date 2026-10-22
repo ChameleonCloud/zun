@@ -648,3 +648,26 @@ class TestK8sDriverPutArchiveStatus(TestK8sDriver):
         e = self.assertRaises(k8s_exc.PutArchiveFailed, self._put_archive,
                               ws_client, "/100%d")
         self.assertIn("/100%d", str(e))
+
+
+class TestK8sDriverDirectoryCheck(TestK8sDriver):
+    def _get_archive(self, check):
+        with mock.patch.object(self.driver, "_connect_pod_exec",
+                               side_effect=[check, self._ws_client()]):
+            return self.driver.get_archive(self.context, mock.MagicMock(),
+                                           "/tmp/d")
+
+    def test_no_answer(self):
+        # Still running at the timeout, so it printed nothing.
+        e = self.assertRaises(k8s_exc.DirectoryCheckFailed,
+                              self._get_archive, self._ws_client(""))
+        self.assertEqual("Could not tell whether /tmp/d is a directory",
+                         str(e))
+
+    def test_status_without_exit_code(self):
+        # returncode raises ValueError when the status has no exit code,
+        # and TypeError when there is no status.
+        for error in (ValueError, TypeError):
+            check = self._ws_client("directory\n")
+            type(check).returncode = mock.PropertyMock(side_effect=error)
+            self._get_archive(check)

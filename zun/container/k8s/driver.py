@@ -841,7 +841,7 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
     def get_archive(self, context, container, path):
         """Copy resource from a container. This utility requires the running container to have sh and tar."""
 
-        def _is_directory(context, container, path):
+        def _path_kind(context, container, path):
             # The path is an argument to the script, never part of it.
             command = shlex.join([
                 "sh", "-c",
@@ -852,16 +852,13 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
                 context, container, command, stdin=False)
             with closing(ws_client):
                 ws_client.run_forever(timeout=CONF.k8s.execute_timeout)
+                return ws_client.read_all().strip()
 
-                exit_code = ws_client.returncode
-                result = ws_client.read_all()
-            return result.strip() == "directory"
+        kind = _path_kind(context, container, path)
 
-        is_directory = _is_directory(context, container, path)
-
-        if is_directory:
+        if kind == "directory":
             tar_argv = ["tar", "cf", "-", "-C", path, "."]
-        else:
+        elif kind == "file":
             dirname, basename = os.path.split(path)
             # "./" keeps a name that starts with "-" from being read as a
             # tar option.
@@ -870,6 +867,8 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
                 "-C", dirname or ".",
                 "./" + basename,
             ]
+        else:
+            raise k8s_exc.DirectoryCheckFailed(path=path)
 
         # _connect_pod_exec shlex.splits the command back into tar_argv.
         ws_client = self._connect_pod_exec(
