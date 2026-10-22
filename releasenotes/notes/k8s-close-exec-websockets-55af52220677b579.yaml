@@ -1,0 +1,8 @@
+---
+fixes:
+  - |
+    On the Kubernetes driver, ``execute`` (with ``run=True``), ``get_archive``
+    and ``put_archive`` now close their websocket to the Kubernetes API server
+    when done. Before, a command still running at ``[k8s] execute_timeout``,
+    or a copy that failed part way, left the connection open until the
+    command ended or the client was garbage-collected.
