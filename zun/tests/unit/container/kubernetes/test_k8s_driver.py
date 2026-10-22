@@ -597,3 +597,54 @@ class TestK8sDriverClosesExecWebsockets(TestK8sDriver):
         self.assertRaises(OSError, self._call, self.driver.put_archive, "/d",
                           b"data", ws_clients=[ws_client])
         self.assertClosed(ws_client)
+
+
+class TestK8sDriverPutArchiveStatus(TestK8sDriver):
+    def _put_archive(self, ws_client, path="/d"):
+        with mock.patch.object(self.driver, "_connect_pod_exec",
+                               return_value=ws_client):
+            self.driver.put_archive(self.context, mock.MagicMock(), path,
+                                    b"data")
+
+    def test_success(self):
+        ws_client = self._ws_client()
+        self._put_archive(ws_client)
+        ws_client.write_stdin.assert_called_once_with(b"data")
+
+    def test_no_exit_code(self):
+        # The status has no exit code, so returncode raises ValueError.
+        ws_client = self._ws_client()
+        type(ws_client).returncode = mock.PropertyMock(side_effect=ValueError)
+        e = self.assertRaises(k8s_exc.K8sException, self._put_archive,
+                              ws_client)
+        self.assertEqual("tar did not report an exit code", str(e))
+        self.assertIsInstance(e.__cause__, ValueError)
+        ws_client.close.assert_called_once_with()
+
+    def test_tar_failure(self):
+        ws_client = self._ws_client()
+        ws_client.returncode = 2
+        ws_client.read_stderr.return_value = (
+            "tar: /missing: Cannot open: No such file or directory\n")
+        e = self.assertRaises(k8s_exc.PutArchiveFailed, self._put_archive,
+                              ws_client, "/missing")
+        self.assertEqual(
+            "tar failed extracting into /missing (exit code 2): "
+            "tar: /missing: Cannot open: No such file or directory", str(e))
+
+    def test_still_running_at_timeout(self):
+        self.config(archive_timeout=120, group="k8s")
+        ws_client = self._ws_client()
+        ws_client.is_open.return_value = True
+        e = self.assertRaises(k8s_exc.PutArchiveTimeout, self._put_archive,
+                              ws_client)
+        self.assertEqual("Timed out after 120s extracting into /d", str(e))
+        ws_client.close.assert_called_once_with()
+
+    def test_percent_in_path(self):
+        ws_client = self._ws_client()
+        ws_client.returncode = 2
+        ws_client.read_stderr.return_value = ""
+        e = self.assertRaises(k8s_exc.PutArchiveFailed, self._put_archive,
+                              ws_client, "/100%d")
+        self.assertIn("/100%d", str(e))
