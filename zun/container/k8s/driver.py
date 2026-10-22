@@ -840,7 +840,12 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
         """Copy resource from a container. This utility requires the running container to have sh and tar."""
 
         def _is_directory(context, container, path):
-            command = f"sh -c 'test -d {path} && echo directory || echo file'"
+            # The path is an argument to the script, never part of it.
+            command = shlex.join([
+                "sh", "-c",
+                'if [ -d "$1" ]; then echo directory; else echo file; fi',
+                "sh", path,
+            ])
             ws_client = self._connect_pod_exec(
                 context, container, command, stdin=False)
             ws_client.run_forever(timeout=CONF.k8s.execute_timeout)
@@ -851,11 +856,21 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
 
         is_directory = _is_directory(context, container, path)
 
-        filename = os.path.basename(path)
-        tar_command = f"tar cf - -C {path} ." if is_directory else f"tar cf - {filename}"
+        if is_directory:
+            tar_argv = ["tar", "cf", "-", "-C", path, "."]
+        else:
+            dirname, basename = os.path.split(path)
+            # "./" keeps a name that starts with "-" from being read as a
+            # tar option.
+            tar_argv = [
+                "tar", "cf", "-",
+                "-C", dirname or ".",
+                "./" + basename,
+            ]
 
+        # _connect_pod_exec shlex.splits the command back into tar_argv.
         ws_client = self._connect_pod_exec(
-            context, container, tar_command, stdin=False)
+            context, container, shlex.join(tar_argv), stdin=False)
 
         tar_bytes = io.BytesIO()
         try:
@@ -883,7 +898,8 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
     def put_archive(self, context, container, path, data):
         """Copy resource to a container. This utility requires the running container to have sh and tar."""
         ws_client = self._connect_pod_exec(
-            context, container, f"tar xmf - -C {path}", stdin=True)
+            context, container, shlex.join(["tar", "xmf", "-", "-C", path]),
+            stdin=True)
 
         ws_client.write_stdin(data)
         ws_client.run_forever(timeout=CONF.k8s.archive_timeout)
