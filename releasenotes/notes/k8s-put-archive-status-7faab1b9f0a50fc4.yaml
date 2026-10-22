@@ -1,0 +1,7 @@
+---
+fixes:
+  - |
+    On the Kubernetes driver, ``put_archive`` now fails when ``tar`` fails in
+    the container, such as when extracting into a missing directory, or when
+    ``tar`` is still running at ``[k8s] archive_timeout``. Before, it returned
+    success, or an internal ``TypeError`` at the timeout.

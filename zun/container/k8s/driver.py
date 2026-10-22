@@ -904,16 +904,23 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
             context, container, shlex.join(["tar", "xmf", "-", "-C", path]),
             stdin=True)
 
+        timeout = CONF.k8s.archive_timeout
         with closing(ws_client):
             ws_client.write_stdin(data)
-            ws_client.run_forever(timeout=CONF.k8s.archive_timeout)
+            ws_client.run_forever(timeout=timeout)
+            if ws_client.is_open():
+                raise k8s_exc.PutArchiveTimeout(timeout=timeout, path=path)
             try:
                 exit_code = ws_client.returncode
-            except ValueError:
-                exit_code = -1
+            except ValueError as e:
+                # returncode raises ValueError if the status has no exit code.
+                raise k8s_exc.K8sException(
+                    "tar did not report an exit code") from e
+            stderr = ws_client.read_stderr()
 
-        if exit_code < 0:
-            raise k8s_exc.K8sException("Failed tar invocation during put_archive")
+        if exit_code != 0:
+            raise k8s_exc.PutArchiveFailed(path=path, exit_code=exit_code,
+                                           stderr=stderr.strip())
 
     def stats(self, context, container):
         """Display stats of the container."""
