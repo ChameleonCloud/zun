@@ -277,7 +277,15 @@ class ZunProxyRequestHandlerBase(object):
             LOG.exception("failed to get websocket options")
             raise self.CClose(1011, "Failed to get websocket options")
 
+        # Only a Kubernetes backend has the "channels" option.
+        k8s_backend = bool(ws_opts.get("channels"))
+        protocol = self.request.passthrough_protocol
+        if protocol and not k8s_backend:
+            self._refuse_passthrough(protocol)
+
         options = {}
+        if protocol:
+            options["subprotocols"] = [protocol]
         if "ca" in ws_opts or "cert" in ws_opts or "key" in ws_opts:
             options["sslopt"] = {
                 "certfile": _write_sock_optfile(ws_opts.get("cert")),
@@ -289,11 +297,14 @@ class ZunProxyRequestHandlerBase(object):
         wscls.connect()
         self.target = wscls
 
-        # Only a Kubernetes backend has the "channels" option.
-        if ws_opts.get("channels"):
+        if k8s_backend:
+            if protocol:
+                to_backend = to_client = relay.unchanged
+            else:
+                to_backend = k8s_remotecommand.frame_from_client
+                to_client = k8s_remotecommand.payload_for_client
             relay.Relay(self.request, self.target.ws,
-                        to_backend=k8s_remotecommand.frame_from_client,
-                        to_client=k8s_remotecommand.payload_for_client).run()
+                        to_backend=to_backend, to_client=to_client).run()
             return
 
         # Start proxying
@@ -350,6 +361,9 @@ class ZunProxyRequestHandlerBase(object):
             self._proxy_native_websocket(container, exec_instance.url)
             return
 
+        if self.request.passthrough_protocol:
+            self._refuse_passthrough(self.request.passthrough_protocol)
+
         client = docker.APIClient(base_url=exec_instance.url)
         tsock = client.exec_start(exec_instance.exec_id, socket=True,
                                   tty=True)
@@ -366,6 +380,10 @@ class ZunProxyRequestHandlerBase(object):
                 tsock.shutdown(socket.SHUT_RDWR)
                 tsock.close()
                 self.vmsg(_("%s: Closed target") % exec_instance.url)
+
+    def _refuse_passthrough(self, protocol):
+        """Close a client that asked for a protocol the backend lacks."""
+        raise self.CClose(1008, "%s needs a Kubernetes backend" % protocol)
 
     def _access_url(self, token, uuid):
         return '%s?token=%s&uuid=%s' % (CONF.websocket_proxy.base_url,

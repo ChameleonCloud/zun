@@ -1,0 +1,11 @@
+---
+features:
+  - |
+    The websocket proxy can relay the Kubernetes exec protocol unchanged.
+    A client that lists ``v5.channel.k8s.io`` or ``v4.channel.k8s.io`` in
+    ``Sec-WebSocket-Protocol`` when it opens an exec or attach websocket
+    gets that protocol from Kubernetes, preferring v5: stdin, stdout and
+    stderr on separate channels, the exit status on the ERROR channel (3),
+    resize on channel 4, and, with v5 only, closing stdin. Clients that list
+    neither get one merged stream, as before. If the container's backend
+    isn't Kubernetes, the proxy closes such a websocket with code 1008.

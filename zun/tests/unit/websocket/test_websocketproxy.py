@@ -15,6 +15,7 @@ from unittest import mock
 from zun.common import exception
 from zun.tests import base
 from zun.websocket import k8s_remotecommand
+from zun.websocket import relay
 from zun.websocket import websocketproxy
 
 
@@ -219,11 +220,13 @@ class ProxyNativeWebsocketTestCase(base.TestCase):
         self.handler = object.__new__(
             websocketproxy.ZunProxyRequestHandlerBase)
         self.handler.compute_api = mock.Mock()
-        self.handler.request = mock.Mock(name="client")
+        self.handler.request = mock.Mock(name="client",
+                                         passthrough_protocol=None)
         self.handler.CClose = FakeCClose
         self.handler.do_websocket_proxy = mock.Mock()
         patcher = mock.patch.object(websocketproxy, "WebSocketClient")
-        self.backend = patcher.start().return_value.ws
+        self.mock_client_cls = patcher.start()
+        self.backend = self.mock_client_cls.return_value.ws
         self.addCleanup(patcher.stop)
 
     def test_options_failure_closes_client_with_1011(self):
@@ -258,3 +261,48 @@ class ProxyNativeWebsocketTestCase(base.TestCase):
 
         self.handler.do_websocket_proxy.assert_called_once_with(self.backend)
         mock_relay.assert_not_called()
+
+    @mock.patch.object(websocketproxy.relay, "Relay")
+    def test_passthrough_asks_kubernetes_for_the_same_protocol(
+            self, mock_relay):
+        self.handler.request.passthrough_protocol = "v5.channel.k8s.io"
+        self.handler.compute_api.container_get_websocket_opts.return_value = {
+            "channels": {"stdin": 0}}
+
+        self.handler._proxy_native_websocket(mock.Mock(), "wss://k8s/exec")
+
+        self.assertEqual(["v5.channel.k8s.io"],
+                         self.mock_client_cls.call_args[1]["subprotocols"])
+        mock_relay.assert_called_once_with(
+            self.handler.request, self.backend,
+            to_backend=relay.unchanged, to_client=relay.unchanged)
+
+    def test_passthrough_to_docker_is_refused_before_connecting(self):
+        self.handler.request.passthrough_protocol = "v5.channel.k8s.io"
+        self.handler.compute_api.container_get_websocket_opts.return_value = {}
+
+        exc = self.assertRaises(
+            FakeCClose, self.handler._proxy_native_websocket,
+            mock.Mock(), "ws://docker/attach")
+
+        self.assertEqual(
+            (1008, "v5.channel.k8s.io needs a Kubernetes backend"), exc.args)
+        self.mock_client_cls.assert_not_called()
+
+
+class DockerExecPassthroughTestCase(base.TestCase):
+
+    @mock.patch.object(websocketproxy.docker, "APIClient")
+    def test_passthrough_is_refused_before_starting_the_exec(
+            self, mock_api_client):
+        handler = object.__new__(websocketproxy.ZunProxyRequestHandlerBase)
+        handler.request = mock.Mock(passthrough_protocol="v4.channel.k8s.io")
+        handler.CClose = FakeCClose
+        exec_instance = mock.Mock(url="tcp://docker:2375")
+
+        exc = self.assertRaises(FakeCClose, handler._connect_exec,
+                                mock.Mock(), exec_instance)
+
+        self.assertEqual(
+            (1008, "v4.channel.k8s.io needs a Kubernetes backend"), exc.args)
+        mock_api_client.assert_not_called()

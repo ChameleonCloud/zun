@@ -26,6 +26,13 @@ LOG = logging.getLogger(__name__)
 # connection.
 CLOSE_WAIT = 2.0
 
+# Kubernetes exec protocols a client can ask for, most preferred first.
+PASSTHROUGH_PROTOCOLS = ("v5.channel.k8s.io", "v4.channel.k8s.io")
+
+
+def unchanged(msg):
+    return msg
+
 
 class ZunWebSocket(websockifyserver.CompatibleWebSocket):
     """The client's websocket.
@@ -43,9 +50,27 @@ class ZunWebSocket(websockifyserver.CompatibleWebSocket):
 
     relaying = False
 
+    # The Kubernetes exec protocol the client asked for, if any.
+    passthrough_protocol = None
+
     def __init__(self, request_handler):
         super().__init__(request_handler)
         self._write_lock = threading.RLock()
+
+    def select_subprotocol(self, protocols):
+        """Pick a Kubernetes exec protocol if the client offers one.
+
+        Names are matched without surrounding spaces, and the choice is
+        returned exactly as it appears in protocols, because websockify
+        requires one of those entries. Otherwise websockify's own choice is
+        used.
+        """
+        offered = {protocol.strip(): protocol for protocol in protocols}
+        for protocol in PASSTHROUGH_PROTOCOLS:
+            if protocol in offered:
+                self.passthrough_protocol = protocol
+                return offered[protocol]
+        return super().select_subprotocol(protocols)
 
     def _write(self, method, *args):
         with self._write_lock:

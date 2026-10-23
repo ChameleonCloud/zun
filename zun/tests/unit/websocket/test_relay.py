@@ -117,6 +117,25 @@ class MergedRelayTestCase(base.TestCase):
         self.assertEqual([b"out", b"err"], client.sent)
 
 
+class PassthroughRelayTestCase(base.TestCase):
+
+    def test_messages_pass_unchanged_both_ways(self):
+        client = FakeClient([b"\x00ls\n", b"\xff\x00"])
+        backend = FakeBackend([
+            (BINARY, b"\x01out"),
+            (BINARY, b'\x03{"status":"Success"}'),
+            CLOSE,
+        ])
+        session = relay.Relay(client, backend, to_backend=relay.unchanged,
+                              to_client=relay.unchanged)
+
+        session.run()
+
+        self.assertEqual([b"\x01out", b'\x03{"status":"Success"}'],
+                         client.sent)
+        self.assertEqual((1000, "Target closed"), client.close)
+
+
 class TeardownTestCase(base.TestCase):
 
     def test_backend_close_closes_client(self):
@@ -222,3 +241,46 @@ class ZunWebSocketTestCase(base.TestCase):
 
         self.assertRaises(websockify_websocket.WebSocketWantWriteError,
                           self._socket(False).sendmsg, b"abc")
+
+
+class SelectSubprotocolTestCase(base.TestCase):
+    """The names arrive as websockify splits the header: on ",", unstripped."""
+
+    def _select(self, header):
+        sock = relay.ZunWebSocket(mock.Mock())
+        return sock.select_subprotocol(header.split(",")), sock
+
+    def test_released_zunclient_gets_binary(self):
+        chosen, sock = self._select("binary,base64")
+
+        self.assertEqual(("binary", None), (chosen, sock.passthrough_protocol))
+
+    def test_no_offer_gets_no_protocol(self):
+        chosen, sock = self._select("")
+
+        self.assertEqual(("", None), (chosen, sock.passthrough_protocol))
+
+    def test_v5_is_chosen(self):
+        chosen, sock = self._select("v5.channel.k8s.io")
+
+        self.assertEqual(("v5.channel.k8s.io", "v5.channel.k8s.io"),
+                         (chosen, sock.passthrough_protocol))
+
+    def test_choice_keeps_the_clients_spelling(self):
+        chosen, sock = self._select("foo, v5.channel.k8s.io")
+
+        self.assertEqual((" v5.channel.k8s.io", "v5.channel.k8s.io"),
+                         (chosen, sock.passthrough_protocol))
+
+    def test_choice_is_an_entry_of_an_already_stripped_list(self):
+        sock = relay.ZunWebSocket(mock.Mock())
+
+        chosen = sock.select_subprotocol(["foo", "v5.channel.k8s.io"])
+
+        self.assertEqual("v5.channel.k8s.io", chosen)
+
+    def test_v5_is_preferred_to_v4(self):
+        chosen, sock = self._select("v4.channel.k8s.io,v5.channel.k8s.io")
+
+        self.assertEqual(("v5.channel.k8s.io", "v5.channel.k8s.io"),
+                         (chosen, sock.passthrough_protocol))

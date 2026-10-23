@@ -127,6 +127,19 @@ class SlowReaderTestCase(base.TestCase):
         self.assertEqual(output, b"".join(received))
         self.assertEqual(1000, close_code)
 
+    def test_passthrough_session_delivers_every_message_in_order(self):
+        output = os.urandom(4 * 1024 * 1024)
+        messages = [b"\x01"] + [
+            bytes((1 + i % 2,)) + output[i * 32768:(i + 1) * 32768]
+            for i in range(len(output) // 32768)]
+
+        received, close_code = self._relay_to_slow_reader(
+            messages + [STATUS],
+            to_backend=relay.unchanged, to_client=relay.unchanged)
+
+        self.assertEqual(messages + [STATUS], received)
+        self.assertEqual(1000, close_code)
+
 
 class LockCheckingSocket(object):
     """A socket that records sends and closes made without the write lock."""
