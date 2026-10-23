@@ -252,11 +252,11 @@ class TestAPI(base.TestCase):
         mock_srv_list.return_value = [srv]
         mock_srv_up.return_value = True
         self.compute_api.container_exec(
-            self.context, container, "/bin/bash", True, True)
+            self.context, container, "/bin/bash", True, True, True)
         mock_call.assert_called_once_with(
             container.host, "container_exec",
             container=container, command="/bin/bash",
-            run=True, interactive=True)
+            run=True, stdin=True, tty=True)
 
     @mock.patch('zun.compute.rpcapi.API._call')
     @mock.patch('zun.api.servicegroup.ServiceGroup.service_is_up')
@@ -272,13 +272,13 @@ class TestAPI(base.TestCase):
         mock_srv_list.return_value = [srv]
         mock_srv_up.return_value = True
         result = self.compute_api.container_exec(
-            self.context, container, "/bin/bash", True, True)
+            self.context, container, "/bin/bash", True, True, True)
         self.assertIn('fake-token', result['proxy_url'])
         self.assertIn('fake-exec-id', result['proxy_url'])
         mock_call.assert_called_once_with(
             container.host, "container_exec",
             container=container, command="/bin/bash",
-            run=True, interactive=True)
+            run=True, stdin=True, tty=True)
 
     @mock.patch('zun.compute.rpcapi.API._call')
     @mock.patch('zun.api.servicegroup.ServiceGroup.service_is_up')

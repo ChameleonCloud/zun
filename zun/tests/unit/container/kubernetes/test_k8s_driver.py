@@ -1,5 +1,6 @@
 import shlex
 from unittest import mock
+import urllib.parse
 
 from zun.container.k8s import exception as k8s_exc
 from zun.container.k8s.driver import K8sDriver, zun_context
@@ -187,6 +188,46 @@ class TestK8sDriverActions(TestK8sDriver):
         self.assertIsNone(
             self.driver.execute_resize(
                 exec_id=None, height=None, width=None))
+
+    def _exec_url_params(self, stdin, tty):
+        pod = mock.MagicMock()
+        pod.metadata.name = "pod"
+        pod.metadata.namespace = "project"
+        core_v1 = mock.MagicMock()
+        core_v1.return_value.api_client.configuration.host = (
+            "https://k8s:6443")
+        with mock.patch.object(self.driver, "_pod_for_container",
+                               return_value=pod), \
+                mock.patch.object(self.driver, "core_v1", core_v1):
+            url = self.driver.get_exec_url(
+                self.context, mock.MagicMock(), "handle", "sh -c 'cat'",
+                stdin, tty)
+        parts = urllib.parse.urlsplit(url)
+        self.assertEqual("wss://k8s:6443/api/v1/namespaces/project/pods/pod"
+                         "/exec", url.split("?")[0])
+        return urllib.parse.parse_qsl(parts.query)
+
+    def test_get_exec_url_no_stdin_no_tty(self):
+        params = self._exec_url_params(stdin=False, tty=False)
+        self.assertEqual(
+            [("command", "sh"), ("command", "-c"), ("command", "cat"),
+             ("tty", "false"), ("stdin", "false"), ("stdout", "true"),
+             ("stderr", "true")],
+            params)
+
+    def test_get_exec_url_stdin_without_tty(self):
+        # stderr stays its own stream when there is no terminal.
+        params = self._exec_url_params(stdin=True, tty=False)
+        self.assertIn(("stdin", "true"), params)
+        self.assertIn(("tty", "false"), params)
+        self.assertIn(("stderr", "true"), params)
+
+    def test_get_exec_url_stdin_and_tty(self):
+        # With a terminal, k8s merges stderr into stdout.
+        params = self._exec_url_params(stdin=True, tty=True)
+        self.assertIn(("stdin", "true"), params)
+        self.assertIn(("tty", "true"), params)
+        self.assertIn(("stderr", "false"), params)
 
     def test_resize(self):
         mock_container = mock.MagicMock()

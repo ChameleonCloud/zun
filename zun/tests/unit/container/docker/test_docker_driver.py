@@ -691,6 +691,15 @@ class TestDockerDriver(base.DriverTestCase):
         self.mock_docker.exec_create.assert_called_once_with(
             mock_container.container_id, 'ls', stdin=False, tty=False)
 
+    def test_execute_create_stdin_without_tty(self):
+        self.mock_docker.exec_create = mock.Mock(return_value={'Id': 'test'})
+        mock_container = mock.MagicMock()
+        self.driver.execute_create(
+            self.context, mock_container, 'cat', run=False, stdin=True,
+            tty=False)
+        self.mock_docker.exec_create.assert_called_once_with(
+            mock_container.container_id, 'cat', stdin=True, tty=False)
+
     def test_execute_run(self):
         self.mock_docker.exec_start = mock.Mock(return_value='test')
         self.mock_docker.exec_inspect = mock.Mock(

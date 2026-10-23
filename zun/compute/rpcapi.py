@@ -105,10 +105,10 @@ class API(rpc_service.API):
                           timestamps=timestamps, tail=tail, since=since)
 
     @check_container_host
-    def container_exec(self, context, container, command, run, interactive):
+    def container_exec(self, context, container, command, run, stdin, tty):
         return self._call(container.host, 'container_exec',
                           container=container, command=command, run=run,
-                          interactive=interactive)
+                          stdin=stdin, tty=tty)
 
     @check_container_host
     def container_exec_resize(self, context, container, exec_id, height,

@@ -832,12 +832,12 @@ class Manager(periodic_task.PeriodicTasks):
             raise
 
     @translate_exception
-    def container_exec(self, context, container, command, run, interactive):
+    def container_exec(self, context, container, command, run, stdin, tty):
         LOG.debug('Executing command in container: %s', container.uuid)
         try:
             # NOTE(hongbin): capsule shouldn't reach here
             exec_id = self.driver.execute_create(context, container, command,
-                                                 run=run, interactive=interactive)
+                                                 run=run, stdin=stdin, tty=tty)
             if run:
                 # NOTE(hongbin): capsule shouldn't reach here
                 output, exit_code = self.driver.execute_run(exec_id, command)
@@ -848,7 +848,7 @@ class Manager(periodic_task.PeriodicTasks):
             else:
                 token = uuidutils.generate_uuid()
                 url = self.driver.get_exec_url(context, container, exec_id,
-                                               command, interactive)
+                                               command, stdin, tty)
                 exec_instace = objects.ExecInstance(
                     context, container_id=container.id, exec_id=exec_id,
                     url=url, token=token)

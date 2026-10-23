@@ -1317,7 +1317,8 @@ class TestContainerController(api_base.FunctionalTest):
         response = self.post(url, cmd)
         self.assertEqual(200, response.status_int)
         mock_container_exec.assert_called_once_with(
-            mock.ANY, test_container_obj, cmd['command'], True, False)
+            mock.ANY, test_container_obj, cmd['command'], True, False,
+            False)
 
     def test_exec_command_by_uuid_invalid_state(self):
         uuid = uuidutils.generate_uuid()
@@ -1345,6 +1346,80 @@ class TestContainerController(api_base.FunctionalTest):
         self.assertRaises(AppError, self.post,
                           '/v1/containers/%s/execute' %
                           container_uuid, cmd)
+        self.assertFalse(mock_container_exec.called)
+
+    def _execute(self, mock_get_by_uuid, params, version="1.42"):
+        test_container_obj = objects.Container(self.context,
+                                               **utils.get_test_container())
+        mock_get_by_uuid.return_value = test_container_obj
+        headers = {"OpenStack-API-Version": "container %s" % version}
+        response = self.post(
+            '/v1/containers/%s/execute/' % test_container_obj.uuid,
+            params, headers=headers)
+        return response, test_container_obj
+
+    @patch('zun.common.utils.validate_container_state')
+    @patch('zun.compute.api.API.container_exec')
+    @patch('zun.objects.Container.get_by_uuid')
+    def test_execute_interactive_is_stdin_and_tty(
+            self, mock_get_by_uuid, mock_container_exec, mock_validate):
+        mock_container_exec.return_value = ""
+        response, container = self._execute(
+            mock_get_by_uuid,
+            {'command': 'sh', 'run': 'false', 'interactive': 'true'},
+            version="1.40")
+        self.assertEqual(200, response.status_int)
+        mock_container_exec.assert_called_once_with(
+            mock.ANY, container, 'sh', False, True, True)
+
+    @patch('zun.common.utils.validate_container_state')
+    @patch('zun.compute.api.API.container_exec')
+    @patch('zun.objects.Container.get_by_uuid')
+    def test_execute_stdin_without_tty(
+            self, mock_get_by_uuid, mock_container_exec, mock_validate):
+        mock_container_exec.return_value = ""
+        response, container = self._execute(
+            mock_get_by_uuid,
+            {'command': 'tar xf -', 'run': 'false', 'stdin': 'true'})
+        self.assertEqual(200, response.status_int)
+        mock_container_exec.assert_called_once_with(
+            mock.ANY, container, 'tar xf -', False, True, False)
+
+    @patch('zun.common.utils.validate_container_state')
+    @patch('zun.compute.api.API.container_exec')
+    @patch('zun.objects.Container.get_by_uuid')
+    def test_execute_stdin_and_tty_override_interactive(
+            self, mock_get_by_uuid, mock_container_exec, mock_validate):
+        mock_container_exec.return_value = ""
+        response, container = self._execute(
+            mock_get_by_uuid,
+            {'command': 'sh', 'run': 'false', 'interactive': 'true',
+             'tty': 'false'})
+        self.assertEqual(200, response.status_int)
+        mock_container_exec.assert_called_once_with(
+            mock.ANY, container, 'sh', False, True, False)
+
+    @patch('zun.common.utils.validate_container_state')
+    @patch('zun.compute.api.API.container_exec')
+    @patch('zun.objects.Container.get_by_uuid')
+    def test_execute_stdin_needs_run_false(
+            self, mock_get_by_uuid, mock_container_exec, mock_validate):
+        with self.assertRaisesRegex(AppError,
+                                    "stdin and tty need run to be false"):
+            self._execute(mock_get_by_uuid,
+                          {'command': 'cat', 'stdin': 'true'})
+        self.assertFalse(mock_container_exec.called)
+
+    @patch('zun.common.utils.validate_container_state')
+    @patch('zun.compute.api.API.container_exec')
+    @patch('zun.objects.Container.get_by_uuid')
+    def test_execute_stdin_wrong_api_version(
+            self, mock_get_by_uuid, mock_container_exec, mock_validate):
+        with self.assertRaisesRegex(AppError, "Invalid param stdin"):
+            self._execute(mock_get_by_uuid,
+                          {'command': 'cat', 'run': 'false',
+                           'stdin': 'true'},
+                          version="1.41")
         self.assertFalse(mock_container_exec.called)
 
     @patch('zun.common.utils.validate_container_state')

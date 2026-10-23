@@ -313,3 +313,12 @@ user documentation.
   Add 'device_profiles' parameter on POST /v1/containers.
   This field is used to request Cyborg device/accelerator attachments on the
   container, to, e.g., attach a GPU or other connected physical device.
+
+
+1.42
+----
+
+  Add 'stdin' and 'tty' parameters on POST /v1/containers/{id}/execute.
+  'stdin' keeps the command's stdin open and 'tty' allocates a pseudo-TTY,
+  like docker exec -i and -t. Each defaults to the value of 'interactive',
+  which keeps its meaning of both. They need 'run' to be false.

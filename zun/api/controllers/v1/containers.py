@@ -1000,24 +1000,39 @@ class ContainersController(base.Controller):
     @exception.wrap_pecan_controller_exception
     @validation.validate_query_param(pecan.request,
                                      schema.query_param_execute_command)
-    def execute(self, container_ident, run=True, interactive=False, **kwargs):
+    def execute(self, container_ident, run=True, interactive=False,
+                stdin=None, tty=None, **kwargs):
         """Execute command in a running container.
 
         :param container_ident: UUID or Name of a container.
         :param run: If True, execute run.
         :param interactive: Keep STDIN open and allocate a
                             pseudo-TTY for interactive.
+        :param stdin: Keep STDIN open. Defaults to interactive.
+        :param tty: Allocate a pseudo-TTY. Defaults to interactive.
         """
         container = api_utils.get_resource('Container', container_ident)
         check_policy_on_container(container.as_dict(), "container:execute")
         utils.validate_container_state(container, 'execute')
+        if stdin is not None:
+            api_utils.version_check('stdin', '1.42')
+        if tty is not None:
+            api_utils.version_check('tty', '1.42')
+        explicit = stdin is not None or tty is not None
         try:
             run = strutils.bool_from_string(run, strict=True)
             interactive = strutils.bool_from_string(interactive, strict=True)
+            stdin = (interactive if stdin is None
+                     else strutils.bool_from_string(stdin, strict=True))
+            tty = (interactive if tty is None
+                   else strutils.bool_from_string(tty, strict=True))
         except ValueError:
             bools = ', '.join(strutils.TRUE_STRINGS + strutils.FALSE_STRINGS)
-            raise exception.InvalidValue(_('Valid run or interactive '
-                                           'values are: %s') % bools)
+            raise exception.InvalidValue(_('Valid run, interactive, stdin or '
+                                           'tty values are: %s') % bools)
+        if explicit and run and (stdin or tty):
+            raise exception.InvalidValue(_('stdin and tty need run to be '
+                                           'false.'))
         LOG.debug('Calling compute.container_exec with %(uuid)s command '
                   '%(command)s',
                   {'uuid': container.uuid, 'command': kwargs['command']})
@@ -1025,7 +1040,7 @@ class ContainersController(base.Controller):
         compute_api = pecan.request.compute_api
         return compute_api.container_exec(context, container,
                                           kwargs['command'],
-                                          run, interactive)
+                                          run, stdin, tty)
 
     @pecan.expose('json')
     @exception.wrap_pecan_controller_exception

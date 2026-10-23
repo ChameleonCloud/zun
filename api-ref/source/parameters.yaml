@@ -81,6 +81,22 @@ exec_run:
   in: query
   required: false
   type: boolean
+exec_stdin:
+  description: |
+    Keep STDIN open, like ``docker exec -i``. Defaults to the value of
+    ``interactive``. Requires ``run`` to be false.
+  in: query
+  required: false
+  type: boolean
+  min_version: 1.42
+exec_tty:
+  description: |
+    Allocate a pseudo-TTY, like ``docker exec -t``. Defaults to the value of
+    ``interactive``. Requires ``run`` to be false.
+  in: query
+  required: false
+  type: boolean
+  min_version: 1.42
 fixed_ip-query:
   description: |
     Fixed IP addresses. If you request a specific fixed IP address without

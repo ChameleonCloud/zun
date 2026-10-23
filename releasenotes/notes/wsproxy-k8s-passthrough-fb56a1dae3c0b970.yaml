@@ -7,8 +7,6 @@ features:
     and the proxy asks the Kubernetes API server for that same version. Every
     message is then relayed as Kubernetes sent it: the exit status on the
     status channel, stderr apart from stdout, closing stdin (v5) and terminal
-    resize. Adding ``&stdin=1`` to an exec URL gives a command without a
-    terminal its stdin, for binary data such as tar archives. Clients that
-    list no Kubernetes version, such as python-zunclient and Horizon, get the
-    merged terminal stream, as before. Only the Kubernetes backend supports
-    this.
+    resize. Clients that list no Kubernetes version, such as python-zunclient
+    and Horizon, get the merged terminal stream, as before. Only the
+    Kubernetes backend supports this.

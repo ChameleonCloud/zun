@@ -102,7 +102,7 @@ class FakeDriver(driver.BaseDriver, driver.ContainerDriver,
     def get_websocket_url(self, context, container):
         pass
 
-    def get_exec_url(self, context, container, exec_id, command, interactive):
+    def get_exec_url(self, context, container, exec_id, command, stdin, tty):
         return 'fake_exec_url'
 
     @check_container_id

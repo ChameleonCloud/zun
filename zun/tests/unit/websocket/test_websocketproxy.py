@@ -11,7 +11,6 @@
 #    under the License.
 
 from unittest import mock
-from urllib import parse as urlparse
 
 from zun.common import exception
 from zun.tests import base
@@ -187,29 +186,6 @@ class ZunWebSocketTestCase(base.TestCase):
                       websocketproxy.ZunProxyRequestHandler.SocketClass)
 
 
-class WithStdinTestCase(base.TestCase):
-
-    def test_turns_on_stdin(self):
-        url = websocketproxy._with_stdin(EXEC_URL)
-
-        parts = urlparse.urlsplit(url)
-        params = urlparse.parse_qsl(parts.query)
-        self.assertEqual(urlparse.urlsplit(EXEC_URL).path, parts.path)
-        self.assertEqual(
-            [("command", "sh"), ("command", "-c"),
-             ("command", "tar xf - -C /tmp")],
-            [p for p in params if p[0] == "command"])
-        self.assertIn(("stdin", "true"), params)
-        self.assertNotIn(("stdin", "false"), params)
-        self.assertIn(("tty", "false"), params)
-
-    def test_leaves_a_terminal_alone(self):
-        url = ("wss://k8s:6443/api/v1/namespaces/p/pods/pod/exec?"
-               "command=/bin/sh&stderr=true&stdout=true&stdin=true&tty=true")
-
-        self.assertEqual(url, websocketproxy._with_stdin(url))
-
-
 class ProxyNativeWebsocketTestCase(base.TestCase):
 
     def setUp(self):
@@ -243,19 +219,9 @@ class ProxyNativeWebsocketTestCase(base.TestCase):
         self.handler.do_websocket_proxy.assert_called_once_with(
             self.client_cls.return_value.ws, framed=True, passthrough=True)
 
-    def test_passthrough_turns_on_stdin(self):
-        self.handler.passthrough_protocol = V5
-
-        self.handler._proxy_native_websocket(mock.Mock(), EXEC_URL,
-                                             stdin=True)
-
-        query = urlparse.urlsplit(self._client_kwargs()["host_url"]).query
-        self.assertIn(("stdin", "true"), urlparse.parse_qsl(query))
-
     def test_merged_mode_is_unchanged(self):
-        # stdin is ignored, and no protocol is requested from the backend.
-        self.handler._proxy_native_websocket(mock.Mock(), EXEC_URL,
-                                             stdin=True)
+        # No protocol is requested from the backend.
+        self.handler._proxy_native_websocket(mock.Mock(), EXEC_URL)
 
         kwargs = self._client_kwargs()
         self.assertEqual(EXEC_URL, kwargs["host_url"])
@@ -331,33 +297,3 @@ class PassthroughRelayTestCase(base.TestCase):
         handler._handle_ins_outs(target, [target], [])
 
         self.assertEqual([b"out"], handler.cqueue)
-
-
-class NewWebsocketClientStdinTestCase(base.TestCase):
-
-    UUID = "6f1c2a9e-1111-2222-3333-444455556666"
-
-    def _connect(self, path):
-        handler = _make_handler()
-        handler._new_exec_client = mock.Mock()
-        handler.path = path
-        with mock.patch("eventlet.hubs.use_hub"), \
-                mock.patch.object(websocketproxy.objects.Container,
-                                  "get_by_uuid") as get_by_uuid, \
-                mock.patch.object(websocketproxy, "_admin_context"):
-            handler.new_websocket_client()
-        return handler, get_by_uuid.return_value
-
-    def test_stdin_flag_reaches_the_exec(self):
-        handler, container = self._connect(
-            "/?token=t&uuid=%s&exec_id=e&stdin=1" % self.UUID)
-
-        handler._new_exec_client.assert_called_once_with(
-            container, "t", self.UUID, "e", stdin=True)
-
-    def test_no_stdin_by_default(self):
-        handler, container = self._connect(
-            "/?token=t&uuid=%s&exec_id=e" % self.UUID)
-
-        handler._new_exec_client.assert_called_once_with(
-            container, "t", self.UUID, "e", stdin=False)

@@ -181,6 +181,8 @@ query_param_execute_command = {
     'properties': {
         'run': parameter_types.boolean,
         'interactive': parameter_types.boolean,
+        'stdin': parameter_types.boolean,
+        'tty': parameter_types.boolean,
         'command': parameter_types.exec_command,
     },
     'additionalProperties': False

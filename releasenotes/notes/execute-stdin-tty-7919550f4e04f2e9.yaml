@@ -1,0 +1,14 @@
+---
+features:
+  - |
+    API microversion 1.42 adds ``stdin`` and ``tty`` to
+    ``POST /v1/containers/{container_ident}/execute``. ``stdin`` keeps the
+    command's stdin open and ``tty`` allocates a pseudo-TTY, like
+    ``docker exec -i`` and ``-t``. Each defaults to the value of
+    ``interactive``, which keeps its meaning of both. A command with stdin
+    and no terminal can be fed binary data, such as a tar archive, through
+    the websocket proxy. ``stdin`` and ``tty`` need ``run`` to be false.
+upgrade:
+  - |
+    zun-api and zun-compute must be upgraded together: the ``container_exec``
+    RPC now takes ``stdin`` and ``tty`` instead of ``interactive``.

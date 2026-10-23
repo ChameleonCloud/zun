@@ -1135,6 +1135,8 @@ Request
    - command: exec_command
    - run: exec_run
    - interactive: exec_interactive
+   - stdin: exec_stdin
+   - tty: exec_tty
 
 Response
 --------
