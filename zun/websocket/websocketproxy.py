@@ -304,7 +304,8 @@ class ZunProxyRequestHandlerBase(object):
                 to_backend = k8s_remotecommand.frame_from_client
                 to_client = k8s_remotecommand.payload_for_client
             relay.Relay(self.request, self.target.ws,
-                        to_backend=to_backend, to_client=to_client).run()
+                        to_backend=to_backend, to_client=to_client,
+                        heartbeat=self.server.heartbeat).run()
             return
 
         # Start proxying

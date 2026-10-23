@@ -117,20 +117,27 @@ class Relay(object):
     :param backend: the backend's websocket.WebSocket.
     :param to_backend: transform for messages from the client.
     :param to_client: transform for messages from the backend.
+    :param heartbeat: seconds between pings to the client, or None for no
+        pings.
     """
 
-    def __init__(self, client, backend, to_backend, to_client):
+    def __init__(self, client, backend, to_backend, to_client,
+                 heartbeat=None):
         self.client = client
         self.backend = backend
         self.to_backend = to_backend
         self.to_client = to_client
+        self.heartbeat = heartbeat
         self._client_closed = threading.Event()
+        self._done = threading.Event()
 
     def run(self):
         """Relay until one side closes, then close the other side."""
         self.client.relaying = True
         up = threading.Thread(target=self._pump_to_backend)
         up.start()
+        if self.heartbeat:
+            threading.Thread(target=self._ping_client).start()
         try:
             close = self._pump_to_client()
             if close:
@@ -140,7 +147,16 @@ class Relay(object):
                 self._cut_client()
                 up.join()
         finally:
+            self._done.set()
             self.backend.shutdown()
+
+    def _ping_client(self):
+        while not self._done.wait(self.heartbeat):
+            try:
+                self.client.ping()
+            except Exception:
+                LOG.debug("Couldn't ping the client", exc_info=True)
+                return
 
     def _pump_to_backend(self):
         while True:

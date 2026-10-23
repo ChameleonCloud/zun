@@ -223,6 +223,7 @@ class ProxyNativeWebsocketTestCase(base.TestCase):
         self.handler.request = mock.Mock(name="client",
                                          passthrough_protocol=None)
         self.handler.CClose = FakeCClose
+        self.handler.server = mock.Mock(heartbeat=60)
         self.handler.do_websocket_proxy = mock.Mock()
         patcher = mock.patch.object(websocketproxy, "WebSocketClient")
         self.mock_client_cls = patcher.start()
@@ -249,7 +250,7 @@ class ProxyNativeWebsocketTestCase(base.TestCase):
         mock_relay.assert_called_once_with(
             self.handler.request, self.backend,
             to_backend=k8s_remotecommand.frame_from_client,
-            to_client=k8s_remotecommand.payload_for_client)
+            to_client=k8s_remotecommand.payload_for_client, heartbeat=60)
         mock_relay.return_value.run.assert_called_once_with()
         self.handler.do_websocket_proxy.assert_not_called()
 
@@ -275,7 +276,8 @@ class ProxyNativeWebsocketTestCase(base.TestCase):
                          self.mock_client_cls.call_args[1]["subprotocols"])
         mock_relay.assert_called_once_with(
             self.handler.request, self.backend,
-            to_backend=relay.unchanged, to_client=relay.unchanged)
+            to_backend=relay.unchanged, to_client=relay.unchanged,
+            heartbeat=60)
 
     def test_passthrough_to_docker_is_refused_before_connecting(self):
         self.handler.request.passthrough_protocol = "v5.channel.k8s.io"

@@ -78,6 +78,14 @@ Possible values:
 
 * A list where each element is an allowed origin hostnames, else an empty list
 """),
+    cfg.IntOpt('heartbeat',
+               default=60,
+               min=0,
+               help="""
+Seconds between the websocket pings ``zun-wsproxy`` sends to each
+connected client, so that load balancers don't close idle sessions.
+0 disables the pings.
+"""),
     cfg.BoolOpt('ssl_only',
                 help="Disallow non-encrypted connections."),
     cfg.StrOpt('cert',

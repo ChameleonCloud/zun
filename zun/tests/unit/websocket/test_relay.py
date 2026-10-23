@@ -39,6 +39,7 @@ class FakeClient(object):
             self.inbox.put(msg)
         self.answers_close = answers_close
         self.sent = []
+        self.pings = 0
         self.close = None
         self.socket = mock.Mock()
         self.socket.shutdown.side_effect = lambda how: self.inbox.put(None)
@@ -49,6 +50,9 @@ class FakeClient(object):
     def sendmsg(self, msg):
         self.sent.append(msg)
         return len(msg)
+
+    def ping(self):
+        self.pings += 1
 
     def shutdown(self, how, code=1000, reason=None):
         self.close = (code, reason)
@@ -86,10 +90,11 @@ class FakeBackend(object):
         self.closed = True
 
 
-def _merged_relay(client, backend):
+def _merged_relay(client, backend, heartbeat=None):
     return relay.Relay(client, backend,
                        to_backend=k8s_remotecommand.frame_from_client,
-                       to_client=k8s_remotecommand.payload_for_client)
+                       to_client=k8s_remotecommand.payload_for_client,
+                       heartbeat=heartbeat)
 
 
 class MergedRelayTestCase(base.TestCase):
@@ -217,6 +222,31 @@ class BlockedClientTestCase(base.TestCase):
             self.release.wait(0.01)
 
         self.assertEqual([(b"\x00more input", BINARY)], self.backend.sent)
+
+
+class HeartbeatTestCase(base.TestCase):
+
+    def test_client_is_pinged_while_session_is_idle(self):
+        client = FakeClient()
+        session = _merged_relay(client, FakeBackend(), heartbeat=0.01)
+        thread = threading.Thread(target=session.run)
+        thread.start()
+
+        for _ in range(500):
+            if client.pings >= 2:
+                break
+            threading.Event().wait(0.01)
+        client.inbox.put(None)
+        thread.join(5)
+
+        self.assertGreaterEqual(client.pings, 2)
+
+    def test_no_heartbeat_means_no_pings(self):
+        client = FakeClient([None])
+
+        _merged_relay(client, FakeBackend()).run()
+
+        self.assertEqual(0, client.pings)
 
 
 class ZunWebSocketTestCase(base.TestCase):

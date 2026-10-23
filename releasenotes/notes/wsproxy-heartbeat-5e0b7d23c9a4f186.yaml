@@ -1,0 +1,12 @@
+---
+features:
+  - |
+    ``zun-wsproxy`` now pings each connected websocket client every 60
+    seconds, so that load balancers don't close sessions that are idle, such
+    as a long command with no output. Set
+    ``[websocket_proxy] heartbeat`` to change the interval, or to 0 to turn
+    the pings off.
+upgrade:
+  - |
+    Clients connected to ``zun-wsproxy`` now receive a websocket ping every
+    60 seconds by default. The proxy doesn't wait for the answering pong.
