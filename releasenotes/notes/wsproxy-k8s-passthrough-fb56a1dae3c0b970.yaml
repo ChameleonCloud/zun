@@ -1,0 +1,14 @@
+---
+features:
+  - |
+    zun-wsproxy can relay the Kubernetes exec protocol unchanged. A client
+    that lists ``v5.channel.k8s.io`` or ``v4.channel.k8s.io`` in
+    ``Sec-WebSocket-Protocol`` is answered with one of them (v5 if offered),
+    and the proxy asks the Kubernetes API server for that same version. Every
+    message is then relayed as Kubernetes sent it: the exit status on the
+    status channel, stderr apart from stdout, closing stdin (v5) and terminal
+    resize. Adding ``&stdin=1`` to an exec URL gives a command without a
+    terminal its stdin, for binary data such as tar archives. Clients that
+    list no Kubernetes version, such as python-zunclient and Horizon, get the
+    merged terminal stream, as before. Only the Kubernetes backend supports
+    this.

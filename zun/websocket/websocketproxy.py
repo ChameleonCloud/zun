@@ -31,6 +31,7 @@ from oslo_log import log as logging
 from oslo_utils import uuidutils
 from urllib import parse as urlparse
 import websockify
+from websockify import websockifyserver
 
 from zun.common import context
 from zun.common import exception
@@ -65,8 +66,59 @@ def _write_sock_optfile(contents):
     return path.absolute()
 
 
+# Kubernetes exec protocol versions the proxy relays unchanged to a client
+# that offers them, in order of preference. Version 5 adds closing stdin.
+PASSTHROUGH_PROTOCOLS = ("v5.channel.k8s.io", "v4.channel.k8s.io")
+
+
+def _passthrough_protocol(offered):
+    """The protocol to relay for a client that offered ``offered``.
+
+    ``offered`` is the client's Sec-WebSocket-Protocol header split on ",".
+    Returns the preferred version as the client spelled it, or None for the
+    merged stream.
+    """
+    for wanted in PASSTHROUGH_PROTOCOLS:
+        for p in offered:
+            if p.strip() == wanted:
+                return p
+    return None
+
+
+def _with_stdin(url):
+    """Turn on stdin in a k8s exec URL that has no terminal."""
+    parts = urlparse.urlsplit(url)
+    params = urlparse.parse_qsl(parts.query, keep_blank_values=True)
+    if ("tty", "true") in params:
+        return url
+    params = [(k, v) for k, v in params if k != "stdin"] + [("stdin", "true")]
+    return urlparse.urlunsplit(
+        parts._replace(query=urlparse.urlencode(params)))
+
+
+class ZunWebSocket(websockifyserver.CompatibleWebSocket):
+    """Answers a websocket handshake's subprotocol.
+
+    A client that offers a Kubernetes exec protocol version is answered with
+    the one the proxy will relay; other clients as websockify does.
+    """
+
+    def select_subprotocol(self, protocols):
+        chosen = _passthrough_protocol(protocols)
+        if chosen:
+            # websockify splits the header on "," without stripping, and
+            # requires the answer to be one of the pieces as sent.
+            self.request_handler.passthrough_protocol = chosen.strip()
+            return chosen
+        return super().select_subprotocol(protocols)
+
+
 class ZunProxyRequestHandlerBase(object):
     compute_api: "compute_api.API" = None
+    # The Kubernetes exec protocol version relayed to this client, set during
+    # the handshake; None for the merged stream.
+    passthrough_protocol = None
+    passthrough = False
 
     def verify_origin_proto(self, access_url, origin_proto):
         if not access_url:
@@ -130,7 +182,12 @@ class ZunProxyRequestHandlerBase(object):
                     'port': self.server.target_port})
                 raise self.CClose(closed['code'], closed['reason'])
 
-        if target in outs:
+        if target in outs and self.passthrough:
+            while self.tqueue:
+                # Each client message is one Kubernetes message, channel byte
+                # first; send it as the binary message it was.
+                target.send_binary(self.tqueue.pop(0))
+        elif target in outs:
             while self.tqueue:
                 payload = self._prefix_payload(self.tqueue.pop(0))
                 remaining = self._send_buffer(payload, target)
@@ -189,21 +246,30 @@ class ZunProxyRequestHandlerBase(object):
     def _demux_payload(self, payload):
         """Demux a frame from a backend and split into stdout,stderr channels.
 
-        For unframed backends (docker) the payload passes through unchanged.
+        For unframed backends (docker), and in pass-through mode, the payload
+        passes through unchanged.
         """
+        if self.passthrough:
+            return payload
         if self.framed:
             return k8s_remotecommand.payload_for_client(payload)
         return payload
 
-    def do_websocket_proxy(self, target, framed=False):
+    def do_websocket_proxy(self, target, framed=False, passthrough=False):
         """Proxy websocket link
 
         Proxy client WebSocket to normal target socket.
+
+        In merged mode a framed (k8s) target's channels are flattened into
+        one terminal stream, as python-zunclient and Horizon expect. In
+        pass-through mode every message is relayed unchanged both ways, so
+        the client speaks the Kubernetes exec protocol itself.
         """
         self.cqueue = []
         self.tqueue = []
         self.c_pend = 0
         self.framed = framed
+        self.passthrough = passthrough
         rlist = [self.request, target]
 
         if self.server.heartbeat:
@@ -265,6 +331,7 @@ class ZunProxyRequestHandlerBase(object):
         token = urlparse.parse_qs(query).get("token", [""]).pop()
         uuid = urlparse.parse_qs(query).get("uuid", [""]).pop()
         exec_id = urlparse.parse_qs(query).get("exec_id", [""]).pop()
+        stdin = urlparse.parse_qs(query).get("stdin", [""]).pop() == "1"
 
         ctx = _admin_context()
 
@@ -274,7 +341,8 @@ class ZunProxyRequestHandlerBase(object):
             container = objects.Container.get_by_name(ctx, uuid)
 
         if exec_id:
-            self._new_exec_client(container, token, uuid, exec_id)
+            self._new_exec_client(container, token, uuid, exec_id,
+                                  stdin=stdin)
         else:
             self._new_websocket_client(container, token, uuid)
 
@@ -284,7 +352,13 @@ class ZunProxyRequestHandlerBase(object):
         # and immediately send the request, then send a client disconnect? Or
         # maybe the other end should disconnect :p
 
-    def _proxy_native_websocket(self, container, target_url):
+    def _proxy_native_websocket(self, container, target_url, stdin=False):
+        """Connect to the backend websocket and relay it to the client.
+
+        For a client that asked for pass-through, the backend is asked for
+        exactly the protocol version the client was answered with, and
+        ``stdin`` turns on stdin for an exec without a terminal.
+        """
         try:
             ws_opts = self.compute_api.container_get_websocket_opts(
                 _admin_context(), container)
@@ -293,7 +367,16 @@ class ZunProxyRequestHandlerBase(object):
             # Only zun-compute agents supporting API >=1.2 have this method.
             ws_opts = {}
 
+        framed = bool(ws_opts.get("channels"))
         options = {}
+        if self.passthrough_protocol:
+            if not framed:
+                raise exception.ConnectionFailed(
+                    _("The backend doesn't speak the Kubernetes exec "
+                      "protocol."))
+            options["subprotocols"] = [self.passthrough_protocol]
+            if stdin:
+                target_url = _with_stdin(target_url)
         if "ca" in ws_opts or "cert" in ws_opts or "key" in ws_opts:
             options["sslopt"] = {
                 "certfile": _write_sock_optfile(ws_opts.get("cert")),
@@ -305,11 +388,11 @@ class ZunProxyRequestHandlerBase(object):
         wscls.connect()
         self.target = wscls
 
-        framed = bool(ws_opts.get("channels"))
-
         # Start proxying
         try:
-            self.do_websocket_proxy(self.target.ws, framed=framed)
+            self.do_websocket_proxy(
+                self.target.ws, framed=framed,
+                passthrough=bool(self.passthrough_protocol))
         except Exception:
             if self.target.ws:
                 self.target.ws.close()
@@ -330,7 +413,7 @@ class ZunProxyRequestHandlerBase(object):
 
         self._proxy_native_websocket(container, container.websocket_url)
 
-    def _new_exec_client(self, container, token, uuid, exec_id):
+    def _new_exec_client(self, container, token, uuid, exec_id, stdin=False):
         exec_instance = None
         for e in container.exec_instances:
             if token == e.token and exec_id == e.exec_id:
@@ -356,8 +439,13 @@ class ZunProxyRequestHandlerBase(object):
 
         # Url returned for k8s backend already starts with websocket
         if exec_instance.url.startswith(("ws://", "wss://")):
-            self._proxy_native_websocket(container, exec_instance.url)
+            self._proxy_native_websocket(container, exec_instance.url,
+                                         stdin=stdin)
             return
+
+        if self.passthrough_protocol:
+            raise exception.ConnectionFailed(
+                _("The backend doesn't speak the Kubernetes exec protocol."))
 
         client = docker.APIClient(base_url=exec_instance.url)
         tsock = client.exec_start(exec_id, socket=True, tty=True)
@@ -413,6 +501,8 @@ class ZunProxyRequestHandlerBase(object):
 
 class ZunProxyRequestHandler(ZunProxyRequestHandlerBase,
                              websockify.ProxyRequestHandler):
+    SocketClass = ZunWebSocket
+
     def __init__(self, *args, **kwargs):
         self.compute_api = compute_api.API(_admin_context())
         websockify.ProxyRequestHandler.__init__(self, *args, **kwargs)
