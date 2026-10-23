@@ -2127,6 +2127,79 @@ class TestContainerController(api_base.FunctionalTest):
             test_container_obj.security_groups[0])
 
 
+class TestContainerExecute(api_base.FunctionalTest):
+    """POST /v1/containers/{id}/execute, before and from microversion 1.42."""
+
+    def setUp(self):
+        super().setUp()
+        self.container = objects.Container(self.context,
+                                           **utils.get_test_container())
+
+        get_container = patch('zun.objects.Container.get_by_uuid',
+                              return_value=self.container)
+        get_container.start()
+        self.addCleanup(get_container.stop)
+
+        check_state = patch('zun.common.utils.validate_container_state')
+        check_state.start()
+        self.addCleanup(check_state.stop)
+
+        container_exec = patch('zun.compute.api.API.container_exec',
+                               return_value="")
+        self.container_exec = container_exec.start()
+        self.addCleanup(container_exec.stop)
+
+    def _execute(self, version, **params):
+        return self.post(
+            f'/v1/containers/{self.container.uuid}/execute/', params,
+            headers={'OpenStack-API-Version': f'container {version}'})
+
+    # Before 1.42, interactive means stdin and a TTY, and run=true accepts
+    # it.
+
+    def test_interactive_is_stdin_and_tty_before_1_42(self):
+        self._execute('1.41', command='sh', run='false', interactive='true')
+        self.container_exec.assert_called_once_with(
+            mock.ANY, self.container, 'sh', False, stdin=True, tty=True)
+
+    def test_run_with_interactive_before_1_42(self):
+        self._execute('1.41', command='ls', interactive='true')
+        self.container_exec.assert_called_once_with(
+            mock.ANY, self.container, 'ls', True, stdin=True, tty=True)
+
+    def test_tty_rejected_before_1_42(self):
+        with self.assertRaisesRegex(AppError,
+                                    "Additional properties are not allowed"):
+            self._execute('1.41', command='sh', run='false', tty='true')
+        self.container_exec.assert_not_called()
+
+    # From 1.42, interactive means stdin only, tty is separate, and each
+    # needs run=false.
+
+    def test_interactive_is_stdin_only(self):
+        self._execute('1.42', command='tar xf -', run='false',
+                      interactive='true')
+        self.container_exec.assert_called_once_with(
+            mock.ANY, self.container, 'tar xf -', False,
+            stdin=True, tty=False)
+
+    def test_interactive_and_tty(self):
+        self._execute('1.42', command='sh', run='false', interactive='true',
+                      tty='true')
+        self.container_exec.assert_called_once_with(
+            mock.ANY, self.container, 'sh', False, stdin=True, tty=True)
+
+    def test_run_with_interactive_rejected(self):
+        with self.assertRaisesRegex(AppError, "require run=false"):
+            self._execute('1.42', command='sh', interactive='true')
+        self.container_exec.assert_not_called()
+
+    def test_run_with_tty_rejected(self):
+        with self.assertRaisesRegex(AppError, "require run=false"):
+            self._execute('1.42', command='sh', tty='true')
+        self.container_exec.assert_not_called()
+
+
 class TestContainerEnforcement(api_base.FunctionalTest):
 
     def _common_policy_check(self, rule, func, *arg, **kwarg):

@@ -62,7 +62,8 @@ exec_command:
   type: string
 exec_interactive:
   description: |
-    Keep STDIN open even if not attached, allocate a pseudo-TTY.
+    Keep STDIN open even if not attached. Before 1.42, also allocates a
+    pseudo-TTY. Since 1.42, requires ``run`` to be false.
   in: query
   required: false
   type: boolean
@@ -81,6 +82,13 @@ exec_run:
   in: query
   required: false
   type: boolean
+exec_tty:
+  description: |
+    Allocate a pseudo-TTY. Requires ``run`` to be false.
+  in: query
+  required: false
+  type: boolean
+  min_version: 1.42
 fixed_ip-query:
   description: |
     Fixed IP addresses. If you request a specific fixed IP address without
