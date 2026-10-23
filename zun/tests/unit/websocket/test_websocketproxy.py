@@ -14,6 +14,7 @@ from unittest import mock
 
 from zun.common import exception
 from zun.tests import base
+from zun.websocket import k8s_remotecommand
 from zun.websocket import websocketproxy
 
 
@@ -32,7 +33,6 @@ def _make_handler(cqueue=None, c_pend=False):
     handler.cqueue = [] if cqueue is None else cqueue
     handler.tqueue = []
     handler.c_pend = c_pend
-    handler.framed = False
     handler.request = mock.Mock(name="client_request")
     handler.server = mock.Mock(target_host="host", target_port=1234)
     handler.send_frames = mock.Mock(return_value=False)
@@ -210,3 +210,51 @@ class AuthorizeAttachTestCase(base.TestCase):
         self.assertRaises(exception.InvalidWebsocketUrl,
                           handler._authorize_attach,
                           container, "tok", "uuid")
+
+
+class ProxyNativeWebsocketTestCase(base.TestCase):
+
+    def setUp(self):
+        super(ProxyNativeWebsocketTestCase, self).setUp()
+        self.handler = object.__new__(
+            websocketproxy.ZunProxyRequestHandlerBase)
+        self.handler.compute_api = mock.Mock()
+        self.handler.request = mock.Mock(name="client")
+        self.handler.CClose = FakeCClose
+        self.handler.do_websocket_proxy = mock.Mock()
+        patcher = mock.patch.object(websocketproxy, "WebSocketClient")
+        self.backend = patcher.start().return_value.ws
+        self.addCleanup(patcher.stop)
+
+    def test_options_failure_closes_client_with_1011(self):
+        self.handler.compute_api.container_get_websocket_opts.side_effect = (
+            Exception("rpc timeout"))
+
+        exc = self.assertRaises(
+            FakeCClose, self.handler._proxy_native_websocket,
+            mock.Mock(), "wss://k8s/exec")
+
+        self.assertEqual((1011, "Failed to get websocket options"), exc.args)
+
+    @mock.patch.object(websocketproxy.relay, "Relay")
+    def test_kubernetes_backend_is_relayed_merged(self, mock_relay):
+        self.handler.compute_api.container_get_websocket_opts.return_value = {
+            "channels": {"stdin": 0}}
+
+        self.handler._proxy_native_websocket(mock.Mock(), "wss://k8s/exec")
+
+        mock_relay.assert_called_once_with(
+            self.handler.request, self.backend,
+            to_backend=k8s_remotecommand.frame_from_client,
+            to_client=k8s_remotecommand.payload_for_client)
+        mock_relay.return_value.run.assert_called_once_with()
+        self.handler.do_websocket_proxy.assert_not_called()
+
+    @mock.patch.object(websocketproxy.relay, "Relay")
+    def test_docker_backend_uses_the_select_loop(self, mock_relay):
+        self.handler.compute_api.container_get_websocket_opts.return_value = {}
+
+        self.handler._proxy_native_websocket(mock.Mock(), "ws://docker/attach")
+
+        self.handler.do_websocket_proxy.assert_called_once_with(self.backend)
+        mock_relay.assert_not_called()

@@ -39,6 +39,7 @@ from zun.compute import api as compute_api
 import zun.conf
 from zun import objects
 from zun.websocket import k8s_remotecommand
+from zun.websocket import relay
 from zun.websocket.websocketclient import WebSocketClient
 
 LOG = logging.getLogger(__name__)
@@ -132,7 +133,7 @@ class ZunProxyRequestHandlerBase(object):
 
         if target in outs:
             while self.tqueue:
-                payload = self._prefix_payload(self.tqueue.pop(0))
+                payload = self.tqueue.pop(0)
                 remaining = self._send_buffer(payload, target)
                 if remaining is not None:
                     self.tqueue.appendleft(remaining)
@@ -151,9 +152,7 @@ class ZunProxyRequestHandlerBase(object):
                 raise self.CClose(1000, "Target closed")
             if isinstance(buf, str):
                 buf = buf.encode()
-            buf = self._demux_payload(buf)
-            if buf:
-                self.cqueue.append(buf)
+            self.cqueue.append(buf)
 
     def _drain_cqueue_to_client(self, timeout=2.0):
         """Flush any queued client-bound output before closing.
@@ -180,22 +179,7 @@ class ZunProxyRequestHandlerBase(object):
             if not writable:
                 break  # client gone / stalled; give up rather than hang
 
-    def _prefix_payload(self, payload):
-        """Frame stdin coming from client and going to a backend."""
-        if self.framed:
-            return k8s_remotecommand.frame_from_client(payload)
-        return payload
-
-    def _demux_payload(self, payload):
-        """Demux a frame from a backend and split into stdout,stderr channels.
-
-        For unframed backends (docker) the payload passes through unchanged.
-        """
-        if self.framed:
-            return k8s_remotecommand.payload_for_client(payload)
-        return payload
-
-    def do_websocket_proxy(self, target, framed=False):
+    def do_websocket_proxy(self, target):
         """Proxy websocket link
 
         Proxy client WebSocket to normal target socket.
@@ -203,7 +187,6 @@ class ZunProxyRequestHandlerBase(object):
         self.cqueue = []
         self.tqueue = []
         self.c_pend = 0
-        self.framed = framed
         rlist = [self.request, target]
 
         if self.server.heartbeat:
@@ -292,8 +275,7 @@ class ZunProxyRequestHandlerBase(object):
                 _admin_context(), container)
         except Exception:
             LOG.exception("failed to get websocket options")
-            # Only zun-compute agents supporting API >=1.2 have this method.
-            ws_opts = {}
+            raise self.CClose(1011, "Failed to get websocket options")
 
         options = {}
         if "ca" in ws_opts or "cert" in ws_opts or "key" in ws_opts:
@@ -307,11 +289,16 @@ class ZunProxyRequestHandlerBase(object):
         wscls.connect()
         self.target = wscls
 
-        framed = bool(ws_opts.get("channels"))
+        # Only a Kubernetes backend has the "channels" option.
+        if ws_opts.get("channels"):
+            relay.Relay(self.request, self.target.ws,
+                        to_backend=k8s_remotecommand.frame_from_client,
+                        to_client=k8s_remotecommand.payload_for_client).run()
+            return
 
         # Start proxying
         try:
-            self.do_websocket_proxy(self.target.ws, framed=framed)
+            self.do_websocket_proxy(self.target.ws)
         except Exception:
             if self.target.ws:
                 self.target.ws.close()
@@ -422,6 +409,8 @@ class ZunProxyRequestHandlerBase(object):
 
 class ZunProxyRequestHandler(ZunProxyRequestHandlerBase,
                              websockify.ProxyRequestHandler):
+    SocketClass = relay.ZunWebSocket
+
     def __init__(self, *args, **kwargs):
         self.compute_api = compute_api.API(_admin_context())
         websockify.ProxyRequestHandler.__init__(self, *args, **kwargs)

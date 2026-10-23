@@ -1,0 +1,15 @@
+---
+fixes:
+  - |
+    For containers on the Kubernetes backend, the websocket proxy now reads
+    a command's output only as fast as the client takes it. Before, output
+    the client hadn't read yet was buffered in the proxy without limit.
+  - |
+    The websocket proxy now sends messages to a Kubernetes backend as binary
+    websocket frames, as the Kubernetes exec protocol requires. It used to
+    send text frames.
+  - |
+    If the websocket proxy can't get a container's websocket options from
+    ``zun-compute``, it now closes the client's websocket with code 1011.
+    Before, it connected anyway, and a Kubernetes session then showed raw
+    channel bytes or failed with a TLS error.
