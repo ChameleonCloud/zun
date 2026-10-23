@@ -1023,9 +1023,12 @@ class ContainersController(base.Controller):
                   {'uuid': container.uuid, 'command': kwargs['command']})
         context = pecan.request.context
         compute_api = pecan.request.compute_api
+        # interactive keeps stdin open and allocates a pseudo-TTY.
         return compute_api.container_exec(context, container,
                                           kwargs['command'],
-                                          run, interactive)
+                                          run,
+                                          stdin=interactive,
+                                          tty=interactive)
 
     @pecan.expose('json')
     @exception.wrap_pecan_controller_exception

@@ -172,8 +172,8 @@ class API(object):
         return self.rpcapi.container_logs(context, container, stdout, stderr,
                                           timestamps, tail, since)
 
-    def container_exec(self, context, container, *args):
-        data = self.rpcapi.container_exec(context, container, *args)
+    def container_exec(self, context, container, *args, **kwargs):
+        data = self.rpcapi.container_exec(context, container, *args, **kwargs)
         token = data.pop('token', None)
         exec_id = data.get('exec_id')
         if token:
