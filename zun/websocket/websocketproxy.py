@@ -261,10 +261,10 @@ class ZunProxyRequestHandlerBase(object):
                     _("We do not support scheme '%s' under Python < 2.7.4, "
                       "please use http or https") % parse.scheme)
 
-        query = parse.query
-        token = urlparse.parse_qs(query).get("token", [""]).pop()
-        uuid = urlparse.parse_qs(query).get("uuid", [""]).pop()
-        exec_id = urlparse.parse_qs(query).get("exec_id", [""]).pop()
+        params = urlparse.parse_qs(parse.query)
+        token = params.get("token", [""]).pop()
+        uuid = params.get("uuid", [""]).pop()
+        exec_id = params.get("exec_id", [""]).pop()
 
         ctx = _admin_context()
 
@@ -274,9 +274,11 @@ class ZunProxyRequestHandlerBase(object):
             container = objects.Container.get_by_name(ctx, uuid)
 
         if exec_id:
-            self._new_exec_client(container, token, uuid, exec_id)
+            exec_instance = self._claim_exec(container, token, uuid, exec_id)
+            self._connect_exec(container, exec_instance)
         else:
-            self._new_websocket_client(container, token, uuid)
+            self._authorize_attach(container, token, uuid)
+            self._proxy_native_websocket(container, container.websocket_url)
 
         # TODO(chameleon): here is where we could perhaps trigger a quick
         # websocket resize to an already open client, if exec_id is not
@@ -316,21 +318,22 @@ class ZunProxyRequestHandlerBase(object):
                 self.vmsg(_("Websocket client or target closed"))
             raise
 
-    def _new_websocket_client(self, container, token, uuid):
+    def _authorize_attach(self, container, token, uuid):
+        """Check the token and Origin of a request to attach to a container."""
         if token != container.websocket_token:
             raise exception.InvalidWebsocketToken(token)
 
-        access_url = '%s?token=%s&uuid=%s' % (CONF.websocket_proxy.base_url,
-                                              token, uuid)
-
-        self._verify_origin(access_url)
+        self._verify_origin(self._access_url(token, uuid))
 
         if not container.websocket_url:
             raise exception.InvalidWebsocketUrl()
 
-        self._proxy_native_websocket(container, container.websocket_url)
+    def _claim_exec(self, container, token, uuid, exec_id):
+        """Check the token and Origin of an exec request, and claim the exec.
 
-    def _new_exec_client(self, container, token, uuid, exec_id):
+        Returns the claimed exec instance. Each exec instance can be claimed
+        once.
+        """
         exec_instance = None
         for e in container.exec_instances:
             if token == e.token and exec_id == e.exec_id:
@@ -339,10 +342,7 @@ class ZunProxyRequestHandlerBase(object):
         if not exec_instance:
             raise exception.InvalidWebsocketToken(token)
 
-        access_url = '%s?token=%s&uuid=%s' % (CONF.websocket_proxy.base_url,
-                                              token, uuid)
-
-        self._verify_origin(access_url)
+        self._verify_origin(self._access_url(token, uuid))
 
         # Prevent replay attacks by deleting the exec instance row. This is
         # important because the k8s backend invokes the command when the
@@ -354,13 +354,18 @@ class ZunProxyRequestHandlerBase(object):
         if not exec_instance.destroy(_admin_context()):
             raise exception.InvalidWebsocketToken(token)
 
+        return exec_instance
+
+    def _connect_exec(self, container, exec_instance):
+        """Connect to a claimed exec and relay it to the client."""
         # Url returned for k8s backend already starts with websocket
         if exec_instance.url.startswith(("ws://", "wss://")):
             self._proxy_native_websocket(container, exec_instance.url)
             return
 
         client = docker.APIClient(base_url=exec_instance.url)
-        tsock = client.exec_start(exec_id, socket=True, tty=True)
+        tsock = client.exec_start(exec_instance.exec_id, socket=True,
+                                  tty=True)
         if hasattr(tsock, "_sock"):
             # NOTE(hongbin): dockerpy returns different socket class depending
             # on python version and base_url (see _get_raw_response_socket) so
@@ -374,6 +379,10 @@ class ZunProxyRequestHandlerBase(object):
                 tsock.shutdown(socket.SHUT_RDWR)
                 tsock.close()
                 self.vmsg(_("%s: Closed target") % exec_instance.url)
+
+    def _access_url(self, token, uuid):
+        return '%s?token=%s&uuid=%s' % (CONF.websocket_proxy.base_url,
+                                        token, uuid)
 
     def _verify_origin(self, access_url):
         # Verify Origin

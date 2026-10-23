@@ -12,6 +12,7 @@
 
 from unittest import mock
 
+from zun.common import exception
 from zun.tests import base
 from zun.websocket import websocketproxy
 
@@ -126,3 +127,86 @@ class HandleInsOutsEofTestCase(base.TestCase):
         logged = handler.msg.call_args[0][0]
         self.assertIn("Target closed connection", logged)
         self.assertNotIn("Client closed", logged)
+
+
+def _auth_handler():
+    handler = object.__new__(websocketproxy.ZunProxyRequestHandlerBase)
+    handler._verify_origin = mock.Mock()
+    return handler
+
+
+def _exec_instance(destroyed=True):
+    exec_instance = mock.Mock(token="tok", exec_id="eid")
+    exec_instance.destroy.return_value = destroyed
+    return exec_instance
+
+
+class ClaimExecTestCase(base.TestCase):
+
+    def test_returns_claimed_exec_instance(self):
+        handler = _auth_handler()
+        exec_instance = _exec_instance()
+        container = mock.Mock(exec_instances=[exec_instance])
+
+        claimed = handler._claim_exec(container, "tok", "uuid", "eid")
+
+        self.assertIs(exec_instance, claimed)
+        exec_instance.destroy.assert_called_once()
+
+    def test_wrong_token_is_refused_before_claiming(self):
+        handler = _auth_handler()
+        exec_instance = _exec_instance()
+        container = mock.Mock(exec_instances=[exec_instance])
+
+        self.assertRaises(exception.InvalidWebsocketToken,
+                          handler._claim_exec,
+                          container, "other", "uuid", "eid")
+        exec_instance.destroy.assert_not_called()
+
+    def test_bad_origin_is_refused_before_claiming(self):
+        handler = _auth_handler()
+        handler._verify_origin.side_effect = exception.ValidationError("x")
+        exec_instance = _exec_instance()
+        container = mock.Mock(exec_instances=[exec_instance])
+
+        self.assertRaises(exception.ValidationError,
+                          handler._claim_exec,
+                          container, "tok", "uuid", "eid")
+        exec_instance.destroy.assert_not_called()
+
+    def test_exec_claimed_already_is_refused(self):
+        handler = _auth_handler()
+        container = mock.Mock(exec_instances=[_exec_instance(False)])
+
+        self.assertRaises(exception.InvalidWebsocketToken,
+                          handler._claim_exec,
+                          container, "tok", "uuid", "eid")
+
+
+class AuthorizeAttachTestCase(base.TestCase):
+
+    def test_checks_origin_of_access_url(self):
+        self.config(base_url="ws://proxy/", group="websocket_proxy")
+        handler = _auth_handler()
+        container = mock.Mock(websocket_token="tok", websocket_url="ws://c")
+
+        handler._authorize_attach(container, "tok", "uuid")
+
+        handler._verify_origin.assert_called_once_with(
+            "ws://proxy/?token=tok&uuid=uuid")
+
+    def test_wrong_token_is_refused(self):
+        handler = _auth_handler()
+        container = mock.Mock(websocket_token="tok", websocket_url="ws://c")
+
+        self.assertRaises(exception.InvalidWebsocketToken,
+                          handler._authorize_attach,
+                          container, "other", "uuid")
+
+    def test_container_without_websocket_url_is_refused(self):
+        handler = _auth_handler()
+        container = mock.Mock(websocket_token="tok", websocket_url=None)
+
+        self.assertRaises(exception.InvalidWebsocketUrl,
+                          handler._authorize_attach,
+                          container, "tok", "uuid")
