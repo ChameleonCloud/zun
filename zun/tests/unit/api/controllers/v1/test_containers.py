@@ -1317,7 +1317,27 @@ class TestContainerController(api_base.FunctionalTest):
         response = self.post(url, cmd)
         self.assertEqual(200, response.status_int)
         mock_container_exec.assert_called_once_with(
-            mock.ANY, test_container_obj, cmd['command'], True, False)
+            mock.ANY, test_container_obj, cmd['command'], True,
+            stdin=False, tty=False)
+
+    @patch('zun.common.utils.validate_container_state')
+    @patch('zun.compute.api.API.container_exec')
+    @patch('zun.objects.Container.get_by_uuid')
+    def test_execute_interactive_is_stdin_and_tty(
+            self, mock_get_by_uuid, mock_container_exec, mock_validate):
+        mock_container_exec.return_value = ""
+        test_container = utils.get_test_container()
+        test_container_obj = objects.Container(self.context, **test_container)
+        mock_get_by_uuid.return_value = test_container_obj
+
+        container_uuid = test_container.get('uuid')
+        url = '/v1/containers/%s/%s/' % (container_uuid, 'execute')
+        cmd = {'command': 'sh', 'run': 'false', 'interactive': 'true'}
+        response = self.post(url, cmd)
+        self.assertEqual(200, response.status_int)
+        mock_container_exec.assert_called_once_with(
+            mock.ANY, test_container_obj, cmd['command'], False,
+            stdin=True, tty=True)
 
     def test_exec_command_by_uuid_invalid_state(self):
         uuid = uuidutils.generate_uuid()

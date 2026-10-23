@@ -188,6 +188,47 @@ class TestK8sDriverActions(TestK8sDriver):
             self.driver.execute_resize(
                 exec_id=None, height=None, width=None))
 
+    def _exec_url(self, command="sh -c 'cat'", stdin=False, tty=False):
+        """Build an exec URL for pod "pod" in namespace "project".
+
+        The API server is at https://k8s:6443.
+        """
+        # get_exec_url looks up the container's pod...
+        pod = mock.MagicMock()
+        pod.metadata.name = "pod"
+        pod.metadata.namespace = "project"
+        find_pod = mock.patch.object(
+            self.driver, "_pod_for_container", return_value=pod)
+
+        # ...and reads the API server address from a new k8s client.
+        k8s_client = mock.MagicMock()
+        k8s_client.api_client.configuration.host = "https://k8s:6443"
+        new_k8s_client = mock.patch.object(
+            self.driver, "core_v1", return_value=k8s_client)
+
+        with find_pod, new_k8s_client:
+            return self.driver.get_exec_url(
+                self.context, container=mock.MagicMock(),
+                exec_id="unused-by-k8s", command=command,
+                stdin=stdin, tty=tty)
+
+    def test_get_exec_url(self):
+        # One command= per argument; k8s merges stderr into stdout with a TTY.
+        url = ("wss://k8s:6443/api/v1/namespaces/project/pods/pod/exec"
+               "?command=sh&command=-c&command=cat")
+        self.assertEqual(
+            url + "&tty=false&stdin=false&stdout=true&stderr=true",
+            self._exec_url(stdin=False, tty=False))
+        self.assertEqual(
+            url + "&tty=true&stdin=true&stdout=true&stderr=false",
+            self._exec_url(stdin=True, tty=True))
+        self.assertEqual(
+            url + "&tty=false&stdin=true&stdout=true&stderr=true",
+            self._exec_url(stdin=True, tty=False))
+        self.assertEqual(
+            url + "&tty=true&stdin=false&stdout=true&stderr=false",
+            self._exec_url(stdin=False, tty=True))
+
     def test_resize(self):
         mock_container = mock.MagicMock()
 

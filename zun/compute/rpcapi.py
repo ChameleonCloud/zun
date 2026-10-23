@@ -46,6 +46,7 @@ class API(rpc_service.API):
         * 1.0 - Initial version.
         * 1.1 - Add image endpoints.
         * 1.2 - Add get_websocket_opts endpoint.
+        * 1.3 - container_exec takes stdin and tty instead of interactive.
     """
 
     def __init__(self, context=None, topic=None):
@@ -105,10 +106,10 @@ class API(rpc_service.API):
                           timestamps=timestamps, tail=tail, since=since)
 
     @check_container_host
-    def container_exec(self, context, container, command, run, interactive):
+    def container_exec(self, context, container, command, run, stdin, tty):
         return self._call(container.host, 'container_exec',
                           container=container, command=command, run=run,
-                          interactive=interactive)
+                          stdin=stdin, tty=tty)
 
     @check_container_host
     def container_exec_resize(self, context, container, exec_id, height,

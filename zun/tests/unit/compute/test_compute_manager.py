@@ -1073,13 +1073,14 @@ class TestManager(base.TestCase):
         mock_execute_run.return_value = 'fake_output', 'fake_exit_code'
         container = Container(self.context, **utils.get_test_container())
         result = self.compute_manager.container_exec(
-            self.context, container, 'fake_cmd', True, False)
+            self.context, container, 'fake_cmd', True, False, False)
         self.assertEqual('fake_output', result.get('output'))
         self.assertEqual('fake_exit_code', result.get('exit_code'))
         self.assertIsNone(result.get('exec_id'))
         self.assertIsNone(result.get('token'))
         mock_execute_create.assert_called_once_with(
-            self.context, container, 'fake_cmd', run=True, interactive=False)
+            self.context, container, 'fake_cmd', run=True,
+            stdin=False, tty=False)
         mock_execute_run.assert_called_once_with('fake_exec_id', 'fake_cmd')
 
     @mock.patch.object(ExecInstance, 'create')
@@ -1090,13 +1091,14 @@ class TestManager(base.TestCase):
         mock_execute_create.return_value = 'fake_exec_id'
         container = Container(self.context, **utils.get_test_container())
         result = self.compute_manager.container_exec(
-            self.context, container, 'fake_cmd', False, True)
+            self.context, container, 'fake_cmd', False, True, True)
         self.assertIsNone(result.get('output'))
         self.assertIsNone(result.get('exit_code'))
         self.assertEqual('fake_exec_id', result.get('exec_id'))
         self.assertIsNotNone(result.get('token'))
         mock_execute_create.assert_called_once_with(
-            self.context, container, 'fake_cmd', run=False, interactive=True)
+            self.context, container, 'fake_cmd', run=False,
+            stdin=True, tty=True)
         mock_execute_run.assert_not_called()
 
     @mock.patch.object(fake_driver, 'execute_create')
@@ -1105,7 +1107,8 @@ class TestManager(base.TestCase):
         mock_execute_create.side_effect = exception.DockerError
         self.assertRaises(exception.DockerError,
                           self.compute_manager.container_exec,
-                          self.context, container, 'fake_cmd', True, False)
+                          self.context, container, 'fake_cmd', True,
+                          False, False)
 
     @mock.patch.object(ContainerActionEvent, 'event_start')
     @mock.patch.object(ContainerActionEvent, 'event_finish')

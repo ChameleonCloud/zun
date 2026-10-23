@@ -694,7 +694,8 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
 
         return ws_client
 
-    def execute_create(self, context, container, command, run=True, interactive=False):
+    def execute_create(self, context, container, command, run=True,
+                       stdin=False, tty=False):
         """Create an execute instance for running a command."""
 
         if not run:
@@ -745,7 +746,8 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
         LOG.warning("Killing a container with signal %s is not supported, stopping instead", signal)
         self.stop(context=context, container=container, timeout=None)
 
-    def _exec_url_for_command(self, context, container, command, interactive):
+    def _exec_url_for_command(self, context, container, command,
+                              stdin=False, tty=False):
         """Implement k8s remotecommand exec.
         https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.30/#get-connect-exec-pod-v1-core
         """
@@ -764,18 +766,11 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
         for cmd in command_array:
             params.append(("command", cmd))
 
-        # if interactive, allocate tty and plumb stdin
         # when tty set, stderr and stdout combined
-        if interactive:
-            params.append(("tty", "true"))
-            params.append(("stdin", "true"))
-            params.append(("stdout", "true"))
-            params.append(("stderr", "false"))
-        else:
-            params.append(("tty", "false"))
-            params.append(("stdin", "false"))
-            params.append(("stdout", "true"))
-            params.append(("stderr", "true"))
+        params.append(("tty", "true" if tty else "false"))
+        params.append(("stdin", "true" if stdin else "false"))
+        params.append(("stdout", "true"))
+        params.append(("stderr", "false" if tty else "true"))
 
         query = urlencode(params)
 
@@ -785,11 +780,12 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
 
         return f"{host}/api/v1/namespaces/{namespace}/pods/{name}/exec?{query}"
 
-    def get_exec_url(self, context, container, exec_id, command, interactive):
+    def get_exec_url(self, context, container, exec_id, command,
+                     stdin=False, tty=False):
         # exec_id is the opaque handle from execute_create; for k8s the command
         # is encoded in the url itself, it isn't needed here.
         return self._exec_url_for_command(
-            context, container, command, interactive)
+            context, container, command, stdin, tty)
 
     def get_websocket_url(self, context, container):
         """Get websocket url of a container."""
