@@ -996,6 +996,7 @@ class ContainersController(base.Controller):
         return compute_api.container_logs(context, container, stdout, stderr,
                                           timestamps, tail, since)
 
+    @base.Controller.api_version("1.1", "1.41")
     @pecan.expose('json')
     @exception.wrap_pecan_controller_exception
     @validation.validate_query_param(pecan.request,
@@ -1004,31 +1005,52 @@ class ContainersController(base.Controller):
         """Execute command in a running container.
 
         :param container_ident: UUID or Name of a container.
-        :param run: If True, execute run.
-        :param interactive: Keep STDIN open and allocate a
-                            pseudo-TTY for interactive.
+        :param run: If True, run the command now and return its output.
+        :param interactive: Keep STDIN open and allocate a pseudo-TTY.
         """
+        run = strutils.bool_from_string(run, strict=True)
+        interactive = strutils.bool_from_string(interactive, strict=True)
+        return self._execute(container_ident, kwargs["command"],
+                             run, stdin=interactive, tty=interactive)
+
+    @base.Controller.api_version("1.42")
+    @pecan.expose("json")
+    @exception.wrap_pecan_controller_exception
+    @validation.validate_query_param(
+        pecan.request, schema.query_param_execute_command_v142
+    )
+    def execute(self, container_ident, run=True,  # noqa: F811
+                interactive=False, tty=False, **kwargs):
+        """Execute command in a running container.
+
+        :param container_ident: UUID or Name of a container.
+        :param run: If True, run the command now and return its output.
+        :param interactive: Keep STDIN open.
+        :param tty: Allocate a pseudo-TTY.
+        """
+        run = strutils.bool_from_string(run, strict=True)
+        interactive = strutils.bool_from_string(interactive, strict=True)
+        tty = strutils.bool_from_string(tty, strict=True)
+        # A command the API runs itself can't take input or use a terminal.
+        if run and (interactive or tty):
+            raise exception.InvalidValue(
+                _("interactive=true and tty=true each require run=false.")
+            )
+        return self._execute(
+            container_ident, kwargs["command"], run, stdin=interactive, tty=tty
+        )
+
+    def _execute(self, container_ident, command, run, stdin, tty):
         container = api_utils.get_resource('Container', container_ident)
         check_policy_on_container(container.as_dict(), "container:execute")
         utils.validate_container_state(container, 'execute')
-        try:
-            run = strutils.bool_from_string(run, strict=True)
-            interactive = strutils.bool_from_string(interactive, strict=True)
-        except ValueError:
-            bools = ', '.join(strutils.TRUE_STRINGS + strutils.FALSE_STRINGS)
-            raise exception.InvalidValue(_('Valid run or interactive '
-                                           'values are: %s') % bools)
         LOG.debug('Calling compute.container_exec with %(uuid)s command '
                   '%(command)s',
-                  {'uuid': container.uuid, 'command': kwargs['command']})
+                  {'uuid': container.uuid, 'command': command})
         context = pecan.request.context
         compute_api = pecan.request.compute_api
-        # interactive keeps stdin open and allocates a pseudo-TTY.
-        return compute_api.container_exec(context, container,
-                                          kwargs['command'],
-                                          run,
-                                          stdin=interactive,
-                                          tty=interactive)
+        return compute_api.container_exec(context, container, command, run,
+                                          stdin=stdin, tty=tty)
 
     @pecan.expose('json')
     @exception.wrap_pecan_controller_exception

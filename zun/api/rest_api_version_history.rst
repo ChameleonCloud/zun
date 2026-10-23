@@ -313,3 +313,11 @@ user documentation.
   Add 'device_profiles' parameter on POST /v1/containers.
   This field is used to request Cyborg device/accelerator attachments on the
   container, to, e.g., attach a GPU or other connected physical device.
+
+
+1.42
+----
+
+  On POST /v1/containers/{id}/execute, 'interactive' now only keeps the
+  command's stdin open, and the new 'tty' parameter allocates a pseudo-TTY.
+  'interactive=true' and 'tty=true' each require 'run' to be false.

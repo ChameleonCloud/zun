@@ -186,6 +186,9 @@ query_param_execute_command = {
     'additionalProperties': False
 }
 
+query_param_execute_command_v142 = copy.deepcopy(query_param_execute_command)
+query_param_execute_command_v142["properties"]["tty"] = parameter_types.boolean
+
 query_param_commit = {
     'type': 'object',
     'properties': {

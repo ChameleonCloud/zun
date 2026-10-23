@@ -1,0 +1,13 @@
+---
+features:
+  - |
+    API microversion 1.42 adds ``tty`` to
+    ``POST /v1/containers/{container_ident}/execute``, and ``interactive`` now
+    only keeps the command's stdin open, like ``docker exec -i`` and ``-t``.
+    Before 1.42, ``interactive`` also allocates a pseudo-TTY. From 1.42,
+    ``interactive=true`` and ``tty=true`` each require ``run`` to be false.
+upgrade:
+  - |
+    Clients that request microversion 1.42 or later and want a terminal for
+    ``execute`` must send ``tty=true``. ``interactive`` no longer allocates
+    one.
