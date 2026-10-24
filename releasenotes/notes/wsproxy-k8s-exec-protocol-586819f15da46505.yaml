@@ -1,0 +1,16 @@
+---
+features:
+  - |
+    For containers on the Kubernetes backend, zun-wsproxy now relays the
+    Kubernetes exec protocol unchanged to a client that offers
+    ``v5.channel.k8s.io`` or ``v4.channel.k8s.io`` in
+    ``Sec-WebSocket-Protocol``. Such a client gets stdout and stderr on
+    separate channels, the command's exit status, and, with v5, can close
+    the command's stdin. Clients that offer neither, such as Horizon's
+    console and released python-zunclient, get the merged stream as before.
+    Offering one of these protocols for a container on another backend
+    closes the session with code 1008.
+fixes:
+  - |
+    zun-wsproxy now sends binary websocket frames to Kubernetes for
+    Kubernetes containers. It sent text frames before.
