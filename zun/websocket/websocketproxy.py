@@ -211,7 +211,6 @@ class ZunProxyRequestHandlerBase(object):
         self.framed = framed
         self.opcode = (websocket.ABNF.OPCODE_BINARY if binary
                        else websocket.ABNF.OPCODE_TEXT)
-        rlist = [self.request, target]
 
         if self.server.heartbeat:
             now = time.time()
@@ -220,6 +219,12 @@ class ZunProxyRequestHandlerBase(object):
             self.heartbeat = None
 
         while True:
+            rlist = [self.request]
+            # IMPORTANT: only read more from the target once the client has
+            # caught up, so a slow client applies backpressure to the target
+            # instead of running the proxy out of memory.
+            if not (self.cqueue or self.c_pend):
+                rlist.append(target)
             wlist = []
 
             if self.heartbeat is not None:
