@@ -1317,7 +1317,27 @@ class TestContainerController(api_base.FunctionalTest):
         response = self.post(url, cmd)
         self.assertEqual(200, response.status_int)
         mock_container_exec.assert_called_once_with(
-            mock.ANY, test_container_obj, cmd['command'], True, False)
+            mock.ANY, test_container_obj, cmd['command'], True,
+            stdin=False, tty=False)
+
+    @patch('zun.common.utils.validate_container_state')
+    @patch('zun.compute.api.API.container_exec')
+    @patch('zun.objects.Container.get_by_uuid')
+    def test_execute_interactive_is_stdin_and_tty(
+            self, mock_get_by_uuid, mock_container_exec, mock_validate):
+        mock_container_exec.return_value = ""
+        test_container = utils.get_test_container()
+        test_container_obj = objects.Container(self.context, **test_container)
+        mock_get_by_uuid.return_value = test_container_obj
+
+        container_uuid = test_container.get('uuid')
+        url = '/v1/containers/%s/%s/' % (container_uuid, 'execute')
+        cmd = {'command': 'sh', 'run': 'false', 'interactive': 'true'}
+        response = self.post(url, cmd)
+        self.assertEqual(200, response.status_int)
+        mock_container_exec.assert_called_once_with(
+            mock.ANY, test_container_obj, cmd['command'], False,
+            stdin=True, tty=True)
 
     def test_exec_command_by_uuid_invalid_state(self):
         uuid = uuidutils.generate_uuid()
@@ -2105,6 +2125,79 @@ class TestContainerController(api_base.FunctionalTest):
         mock_remove_security_group.assert_called_once_with(
             mock.ANY, test_container_obj,
             test_container_obj.security_groups[0])
+
+
+class TestContainerExecute(api_base.FunctionalTest):
+    """POST /v1/containers/{id}/execute, before and from microversion 1.42."""
+
+    def setUp(self):
+        super().setUp()
+        self.container = objects.Container(self.context,
+                                           **utils.get_test_container())
+
+        get_container = patch('zun.objects.Container.get_by_uuid',
+                              return_value=self.container)
+        get_container.start()
+        self.addCleanup(get_container.stop)
+
+        check_state = patch('zun.common.utils.validate_container_state')
+        check_state.start()
+        self.addCleanup(check_state.stop)
+
+        container_exec = patch('zun.compute.api.API.container_exec',
+                               return_value="")
+        self.container_exec = container_exec.start()
+        self.addCleanup(container_exec.stop)
+
+    def _execute(self, version, **params):
+        return self.post(
+            f'/v1/containers/{self.container.uuid}/execute/', params,
+            headers={'OpenStack-API-Version': f'container {version}'})
+
+    # Before 1.42, interactive means stdin and a TTY, and run=true accepts
+    # it.
+
+    def test_interactive_is_stdin_and_tty_before_1_42(self):
+        self._execute('1.41', command='sh', run='false', interactive='true')
+        self.container_exec.assert_called_once_with(
+            mock.ANY, self.container, 'sh', False, stdin=True, tty=True)
+
+    def test_run_with_interactive_before_1_42(self):
+        self._execute('1.41', command='ls', interactive='true')
+        self.container_exec.assert_called_once_with(
+            mock.ANY, self.container, 'ls', True, stdin=True, tty=True)
+
+    def test_tty_rejected_before_1_42(self):
+        with self.assertRaisesRegex(AppError,
+                                    "Additional properties are not allowed"):
+            self._execute('1.41', command='sh', run='false', tty='true')
+        self.container_exec.assert_not_called()
+
+    # From 1.42, interactive means stdin only, tty is separate, and each
+    # needs run=false.
+
+    def test_interactive_is_stdin_only(self):
+        self._execute('1.42', command='tar xf -', run='false',
+                      interactive='true')
+        self.container_exec.assert_called_once_with(
+            mock.ANY, self.container, 'tar xf -', False,
+            stdin=True, tty=False)
+
+    def test_interactive_and_tty(self):
+        self._execute('1.42', command='sh', run='false', interactive='true',
+                      tty='true')
+        self.container_exec.assert_called_once_with(
+            mock.ANY, self.container, 'sh', False, stdin=True, tty=True)
+
+    def test_run_with_interactive_rejected(self):
+        with self.assertRaisesRegex(AppError, "require run=false"):
+            self._execute('1.42', command='sh', interactive='true')
+        self.container_exec.assert_not_called()
+
+    def test_run_with_tty_rejected(self):
+        with self.assertRaisesRegex(AppError, "require run=false"):
+            self._execute('1.42', command='sh', tty='true')
+        self.container_exec.assert_not_called()
 
 
 class TestContainerEnforcement(api_base.FunctionalTest):

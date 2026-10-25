@@ -126,3 +126,100 @@ class HandleInsOutsEofTestCase(base.TestCase):
         logged = handler.msg.call_args[0][0]
         self.assertIn("Target closed connection", logged)
         self.assertNotIn("Client closed", logged)
+
+
+class SelectSubprotocolTestCase(base.TestCase):
+
+    def _select(self, header):
+        ws = websocketproxy.ZunWebSocket(mock.Mock(name="request_handler"))
+        return ws.select_subprotocol(header.split(','))
+
+    def test_v5_is_chosen(self):
+        self.assertEqual('v5.channel.k8s.io',
+                         self._select('v5.channel.k8s.io'))
+
+    def test_v5_is_preferred_to_v4_and_returned_with_its_space(self):
+        self.assertEqual(' v5.channel.k8s.io',
+                         self._select('v4.channel.k8s.io, v5.channel.k8s.io'))
+
+    def test_released_zunclient_gets_binary(self):
+        self.assertEqual('binary', self._select('binary, base64'))
+
+    def test_no_offer_gets_no_protocol(self):
+        self.assertEqual('', self._select(''))
+
+
+@mock.patch.object(websocketproxy, "WebSocketClient")
+class ProxyNativeWebsocketTestCase(base.TestCase):
+
+    def _handler(self, protocol, ws_opts):
+        handler = object.__new__(websocketproxy.ZunProxyRequestHandlerBase)
+        handler.compute_api = mock.Mock()
+        handler.compute_api.container_get_websocket_opts.return_value = (
+            ws_opts)
+        handler.request = mock.Mock(protocol=protocol)
+        handler.CClose = FakeCClose
+        handler.do_websocket_proxy = mock.Mock()
+        return handler
+
+    @mock.patch.object(websocketproxy, "_admin_context")
+    def test_k8s_passthrough_asks_for_the_same_protocol(self, mock_ctx,
+                                                        mock_client):
+        handler = self._handler(' v5.channel.k8s.io', {"channels": True})
+
+        handler._proxy_native_websocket(mock.Mock(), "wss://k8s/exec")
+
+        mock_client.assert_called_once_with(
+            host_url="wss://k8s/exec", escape="~", close_wait=0.5,
+            subprotocols=['v5.channel.k8s.io'])
+        handler.do_websocket_proxy.assert_called_once_with(
+            mock_client.return_value.ws, framed=False, binary=True)
+
+    @mock.patch.object(websocketproxy, "_admin_context")
+    def test_docker_passthrough_is_refused_before_connecting(self, mock_ctx,
+                                                             mock_client):
+        handler = self._handler('v5.channel.k8s.io', {})
+
+        e = self.assertRaises(FakeCClose, handler._proxy_native_websocket,
+                              mock.Mock(), "ws://docker/attach")
+
+        self.assertEqual(
+            (1008, "Exec protocol needs a Kubernetes container"), e.args)
+        mock_client.assert_not_called()
+        handler.do_websocket_proxy.assert_not_called()
+
+    @mock.patch.object(websocketproxy, "_admin_context")
+    def test_old_client_on_k8s_is_merged(self, mock_ctx, mock_client):
+        handler = self._handler('binary', {"channels": True})
+
+        handler._proxy_native_websocket(mock.Mock(), "wss://k8s/exec")
+
+        mock_client.assert_called_once_with(
+            host_url="wss://k8s/exec", escape="~", close_wait=0.5)
+        handler.do_websocket_proxy.assert_called_once_with(
+            mock_client.return_value.ws, framed=True, binary=True)
+
+    @mock.patch.object(websocketproxy, "_admin_context")
+    def test_docker_session_is_unchanged(self, mock_ctx, mock_client):
+        handler = self._handler('binary', {})
+
+        handler._proxy_native_websocket(mock.Mock(), "ws://docker/attach")
+
+        mock_client.assert_called_once_with(
+            host_url="ws://docker/attach", escape="~", close_wait=0.5)
+        handler.do_websocket_proxy.assert_called_once_with(
+            mock_client.return_value.ws, framed=False, binary=False)
+
+
+class SendBufferTestCase(base.TestCase):
+
+    def test_sends_with_the_sessions_opcode(self):
+        handler = _make_handler()
+        handler.opcode = websocketproxy.websocket.ABNF.OPCODE_BINARY
+        target = mock.Mock(name="target")
+        target.send.return_value = 4
+
+        self.assertIsNone(handler._send_buffer(b"\x00abc", target))
+
+        target.send.assert_called_once_with(
+            b"\x00abc", websocketproxy.websocket.ABNF.OPCODE_BINARY)

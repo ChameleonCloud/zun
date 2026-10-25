@@ -30,7 +30,9 @@ import docker
 from oslo_log import log as logging
 from oslo_utils import uuidutils
 from urllib import parse as urlparse
+import websocket
 import websockify
+from websockify import websockifyserver
 
 from zun.common import context
 from zun.common import exception
@@ -43,6 +45,9 @@ from zun.websocket.websocketclient import WebSocketClient
 
 LOG = logging.getLogger(__name__)
 CONF = zun.conf.CONF
+
+# Kubernetes exec protocols relayed unchanged when a client asks for one.
+PASSTHROUGH_PROTOCOLS = ('v5.channel.k8s.io', 'v4.channel.k8s.io')
 
 
 def _admin_context():
@@ -92,7 +97,7 @@ class ZunProxyRequestHandlerBase(object):
         while tosend > 0:
             try:
                 # i should be able to send a bytearray
-                sent = target.send(buff[already_sent:])
+                sent = target.send(buff[already_sent:], self.opcode)
                 if sent == 0:
                     raise RuntimeError('socket connection broken')
 
@@ -195,7 +200,7 @@ class ZunProxyRequestHandlerBase(object):
             return k8s_remotecommand.payload_for_client(payload)
         return payload
 
-    def do_websocket_proxy(self, target, framed=False):
+    def do_websocket_proxy(self, target, framed=False, binary=False):
         """Proxy websocket link
 
         Proxy client WebSocket to normal target socket.
@@ -204,7 +209,8 @@ class ZunProxyRequestHandlerBase(object):
         self.tqueue = []
         self.c_pend = 0
         self.framed = framed
-        rlist = [self.request, target]
+        self.opcode = (websocket.ABNF.OPCODE_BINARY if binary
+                       else websocket.ABNF.OPCODE_TEXT)
 
         if self.server.heartbeat:
             now = time.time()
@@ -213,6 +219,12 @@ class ZunProxyRequestHandlerBase(object):
             self.heartbeat = None
 
         while True:
+            rlist = [self.request]
+            # IMPORTANT: only read more from the target once the client has
+            # caught up, so a slow client applies backpressure to the target
+            # instead of running the proxy out of memory.
+            if not (self.cqueue or self.c_pend):
+                rlist.append(target)
             wlist = []
 
             if self.heartbeat is not None:
@@ -293,7 +305,17 @@ class ZunProxyRequestHandlerBase(object):
             # Only zun-compute agents supporting API >=1.2 have this method.
             ws_opts = {}
 
+        # Only a Kubernetes backend has the "channels" option.
+        k8s_backend = bool(ws_opts.get("channels"))
+        protocol = (self.request.protocol or '').strip()
+        passthrough = protocol in PASSTHROUGH_PROTOCOLS
+        if passthrough and not k8s_backend:
+            raise self.CClose(1008, "Exec protocol needs a Kubernetes "
+                                    "container")
+
         options = {}
+        if passthrough:
+            options["subprotocols"] = [protocol]
         if "ca" in ws_opts or "cert" in ws_opts or "key" in ws_opts:
             options["sslopt"] = {
                 "certfile": _write_sock_optfile(ws_opts.get("cert")),
@@ -305,11 +327,11 @@ class ZunProxyRequestHandlerBase(object):
         wscls.connect()
         self.target = wscls
 
-        framed = bool(ws_opts.get("channels"))
-
         # Start proxying
         try:
-            self.do_websocket_proxy(self.target.ws, framed=framed)
+            self.do_websocket_proxy(self.target.ws,
+                                    framed=k8s_backend and not passthrough,
+                                    binary=k8s_backend)
         except Exception:
             if self.target.ws:
                 self.target.ws.close()
@@ -411,8 +433,22 @@ class ZunProxyRequestHandlerBase(object):
                 raise exception.ValidationError(detail)
 
 
+class ZunWebSocket(websockifyserver.CompatibleWebSocket):
+    def select_subprotocol(self, protocols):
+        # websockify splits "v4.channel.k8s.io, v5.channel.k8s.io" into
+        # ["v4.channel.k8s.io", " v5.channel.k8s.io"] and rejects a reply
+        # that isn't one of those strings, so return the entry unstripped.
+        for wanted in PASSTHROUGH_PROTOCOLS:
+            for offered in protocols:
+                if offered.strip() == wanted:
+                    return offered
+        return super().select_subprotocol(protocols)
+
+
 class ZunProxyRequestHandler(ZunProxyRequestHandlerBase,
                              websockify.ProxyRequestHandler):
+    SocketClass = ZunWebSocket
+
     def __init__(self, *args, **kwargs):
         self.compute_api = compute_api.API(_admin_context())
         websockify.ProxyRequestHandler.__init__(self, *args, **kwargs)
