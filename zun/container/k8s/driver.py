@@ -895,9 +895,13 @@ class K8sDriver(driver.ContainerDriver, driver.BaseDriver):
 
     @utils.check_container_id
     def put_archive(self, context, container, path, data):
-        """Copy resource to a container. This utility requires the running container to have sh and tar."""
+        """Copy resource to a container. This utility requires the running container to have sh, head and tar."""
+        # The Kubernetes client can't close stdin, so tar would wait for more
+        # input until the timeout. head ends tar's input after the archive.
         ws_client = self._connect_pod_exec(
-            context, container, shlex.join(["tar", "xmf", "-", "-C", path]),
+            context, container, shlex.join([
+                "sh", "-c", 'head -c "$1" | tar xmf - -C "$2"', "sh",
+                str(len(data)), path]),
             stdin=True)
 
         timeout = CONF.k8s.archive_timeout

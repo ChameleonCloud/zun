@@ -1,0 +1,8 @@
+---
+fixes:
+  - |
+    On the Kubernetes driver, ``put_archive`` now returns once ``tar`` has
+    extracted the archive. Before, ``tar`` waited for more input until
+    ``[k8s] archive_timeout``, so every upload took that long and failed,
+    usually with a gateway timeout first, even though the files had been
+    extracted.
