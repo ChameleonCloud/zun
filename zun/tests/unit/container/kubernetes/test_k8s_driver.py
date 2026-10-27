@@ -567,7 +567,8 @@ class TestK8sDriverArchiveArgv(TestK8sDriver):
     def test_put_archive(self):
         self._run(self.driver.put_archive, self.PATH, b"data",
                   ws_clients=[self._ws_client()])
-        self.assertEqual(["tar", "xmf", "-", "-C", self.PATH],
+        self.assertEqual(["sh", "-c", 'head -c "$1" | tar xmf - -C "$2"',
+                          "sh", "4", self.PATH],
                          self.commands[0])
 
     def test_file_by_full_path(self):
